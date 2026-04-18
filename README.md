@@ -14,7 +14,7 @@ Codex CLI 세션을 수집·검색·복기하는 자체 호스팅 웹 대시보�
 |------|------|
 | 백엔드 | Python 3.12, FastAPI, uvicorn, watchdog |
 | 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v15 스키마 |
-| 프런트 | esbuild 번들 (259KB) + Tailwind v3 빌드 (80KB) + Pretendard + Outfit + Chart.js |
+| 프런트 | esbuild 번들 (259KB) + Tailwind v3 빌드 (80KB) + Pretendard + Geist + Instrument Serif + Chart.js |
 | 테스트 | pytest + esbuild 빌드 검증, CI: ruff + bandit + pip-audit + esbuild |
 
 ## 빠른 시작
@@ -25,7 +25,13 @@ cp .env.example .env          # Codex 기본 설정 로드
 ./start.sh                    # .env 로드 → npm build → uvicorn
 ```
 
-기본 접속 주소는 `http://localhost:8617` 이며, 로그인 후 대시보드에 접근한다.
+기본 접속 주소는 `http://localhost:8617` 이다.
+
+- `/` : 공개 랜딩 페이지
+- `/app` : 실제 대시보드 SPA
+- `/login` : 로그인 페이지
+
+랜딩 페이지는 Codex Dashboard 제품 소개와 CTA를 담당하고, 실제 운영 대시보드는 `/app`에서 열린다.
 
 ### 사용자 접근 검증 절차
 
@@ -33,8 +39,9 @@ Codex 런타임을 배포하거나 재시작한 뒤에는 아래 순서로 `8617
 
 1. 바인딩 확인: `ss -ltnp | grep 8617` 결과에 `0.0.0.0:8617` 또는 의도한 바인딩 주소가 보여야 한다.
 2. 인증 필요 여부 확인: `curl http://127.0.0.1:8617/api/auth/me` 응답에서 `DASHBOARD_PASSWORD` 를 설정한 경우 `{"authenticated":false,"auth_required":true}` 가 반환되어야 한다.
-3. 동일 네트워크의 다른 기기에서 원격 접속 확인: 브라우저로 `http://<서버IP>:8617` 에 접속해 로그인 화면이 열리는지 확인한다.
-4. 보호 API 차단 확인: 로그인하지 않은 상태에서 `curl -i http://127.0.0.1:8617/api/stats` 를 호출해 `HTTP/1.1 401 Unauthorized` 또는 JSON `{"error":"unauthorized"}` 가 반환되는지 확인한다.
+3. 공개 랜딩 확인: 브라우저로 `http://<서버IP>:8617/` 에 접속해 랜딩 페이지가 열리는지 확인한다.
+4. 보호 앱 확인: 브라우저로 `http://<서버IP>:8617/app` 에 접속했을 때 인증이 켜져 있으면 `/login` 으로 이동하는지 확인한다.
+5. 보호 API 차단 확인: 로그인하지 않은 상태에서 `curl -i http://127.0.0.1:8617/api/stats` 를 호출해 `HTTP/1.1 401 Unauthorized` 또는 JSON `{"error":"unauthorized"}` 가 반환되는지 확인한다.
 
 인증이 꺼진 개발 환경이라면 2번의 `auth_required` 가 `false` 로 내려오며, 4번의 보호 API 차단도 발생하지 않는다. 운영 환경에서는 반드시 `DASHBOARD_PASSWORD` 를 설정한 뒤 위 절차를 다시 확인한다.
 
@@ -71,6 +78,12 @@ npm run dev                                   # watch 모드 (개발)
 ```
 
 ## 주요 기능
+
+### 공개 랜딩
+- `/` 에 Codex Dashboard 제품 랜딩 제공
+- 랜딩 전용 라이트/다크 토글 지원
+- 딥 다크 + 글래스 + 앰버 + 크림/백지 카드 + Geist + Instrument Serif 시그니처 유지
+- CTA 흐름: `기능 살펴보기` / `로그인해서 시작`
 
 ### Codex 우선 탐색
 - Codex 메시지 검색, 세션 리플레이, 타임라인/사용량/agent 요약을 별도 API 로 제공
@@ -141,6 +154,11 @@ INGEST_KEY=<key> python3 codex_collector.py --url http://dashboard:8617 --node-i
 | CDN | SRI integrity 해시 |
 | CORS | 환경변수 기반 허용 오리진 |
 
+### 공개/보호 경로
+
+- 공개: `/`, `/login`, `/features`, `/landing/ops`, `/landing/team`, `/landing/executive`
+- 보호: `/app`, `/api/*` (헬스/로그인 일부 제외), `/ws`
+
 ### HTTPS 배포
 
 ```bash
@@ -167,7 +185,8 @@ codex_watcher.py     watchdog + safety poll
 codex_collector.py   원격 수집 에이전트 (stdlib only)
 build.js             esbuild + tailwindcss CLI 빌드
 static/
-  index.html         Tailwind 쉘 + 9개 뷰 + data-action 이벤트 위임
+  landing.html       공개 랜딩 + 랜딩 전용 라이트/다크 토글
+  index.html         `/app` 대시보드 쉘 + 9개 뷰 + data-action 이벤트 위임
   login.html         로그인 페이지
   app.js             core: state, bus, accessors, WS, 대화뷰어
   sessions.js        세션 목록, 필터, 벌크, 노드 필터
@@ -227,6 +246,7 @@ sudo systemctl enable --now codex-web-dashboard-retention.timer
 | [`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md) | 8단계 품질 게이트 |
 | [`docs/adr/`](docs/adr/) | 6건 아키텍처 결정 기록 |
 | [`docs/features.html`](docs/features.html) | 기능 레퍼런스 (80+ 항목) |
+| [`SKILLS.md`](SKILLS.md) | 이 저장소에서 자주 쓰는 Codex/gstack 작업 흐름 |
 | [`CLAUDE.md`](CLAUDE.md) | 코드 수정 불변식 |
 | `/docs` (서버) | Swagger UI (라이브) |
 | `/features` (서버) | 기능 레퍼런스 HTML (인증 없이 접근) |
