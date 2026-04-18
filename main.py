@@ -299,7 +299,7 @@ app.add_middleware(
 # track EVERY request (including 401s from auth), register auth FIRST and
 # metrics SECOND. At runtime the order is: metrics → auth → route.
 
-_AUTH_BYPASS = {'/api/health', '/metrics', '/api/ingest', '/api/codex-collector.py',
+_AUTH_BYPASS = {'/', '/api/health', '/metrics', '/api/ingest', '/api/codex-collector.py',
                 '/api/auth/login', '/api/auth/me', '/login', '/features',
                 '/landing/ops', '/landing/team', '/landing/executive'}
 _AUTH_BYPASS_PREFIX = ('/static/',)
@@ -441,6 +441,18 @@ async def static_file(path: str):
 
 @app.get("/")
 async def index():
+    return FileResponse(
+        STATIC_DIR / 'landing.html',
+        headers={
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+        },
+    )
+
+
+@app.get("/app")
+async def app_index():
     # SPA entry: never cache the HTML shell — it contains the ?v=N cache-bust
     # query strings that point at the current static bundle. If the browser
     # caches this file, it keeps loading stale asset versions forever.

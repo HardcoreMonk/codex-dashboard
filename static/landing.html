@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex Dashboard | Codex 세션 검색과 복기</title>
+<meta name="description" content="Codex CLI 세션을 수집하고 검색하고 복기하는 자체 호스팅 운영 대시보드. 세션 흐름, 메시지 문맥, 비용 신호를 한 화면에서 읽습니다.">
+<meta property="og:title" content="Codex Dashboard">
+<meta property="og:description" content="Codex 세션 검색과 복기를 위한 자체 호스팅 운영 대시보드">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
+<style>
+  :root{
+    --bg:#090807;
+    --bg-soft:#12100e;
+    --panel:rgba(255,255,255,.06);
+    --panel-strong:rgba(255,248,239,.9);
+    --panel-cream:#f4eadc;
+    --text:#f8f1e7;
+    --muted:rgba(248,241,231,.68);
+    --subtle:rgba(248,241,231,.45);
+    --ink:#1b1510;
+    --amber:#d79a42;
+    --amber-soft:rgba(215,154,66,.18);
+    --line:rgba(255,245,233,.12);
+    --shadow:0 30px 80px rgba(0,0,0,.35);
+    --radius:30px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:'Pretendard Variable','Pretendard',system-ui,sans-serif;
+    background:
+      radial-gradient(circle at 0% 0%, rgba(215,154,66,.14), transparent 30%),
+      radial-gradient(circle at 100% 20%, rgba(255,255,255,.06), transparent 22%),
+      linear-gradient(180deg, #090807 0%, #0d0b09 32%, #13100d 100%);
+    color:var(--text);
+    line-height:1.6;
+    word-break:keep-all;
+  }
+  body::before{
+    content:"";
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+    background-size:72px 72px;
+    mask-image:linear-gradient(180deg, rgba(0,0,0,.48), transparent 88%);
+  }
+  body::after{
+    content:"";
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    opacity:.08;
+    background-image:radial-gradient(rgba(255,255,255,.9) .5px, transparent .6px);
+    background-size:8px 8px;
+    mix-blend-mode:soft-light;
+  }
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  .container{width:min(1180px,calc(100vw - 32px));margin:0 auto}
+  .glass{
+    background:var(--panel);
+    border:1px solid var(--line);
+    box-shadow:var(--shadow);
+    backdrop-filter:blur(24px);
+  }
+  .nav{
+    position:sticky;
+    top:14px;
+    z-index:40;
+    width:min(1180px,calc(100vw - 24px));
+    margin:14px auto 0;
+    padding:12px 14px;
+    border-radius:999px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    min-width:0;
+  }
+  .brand-mark{
+    width:42px;
+    height:42px;
+    border-radius:14px;
+    display:grid;
+    place-items:center;
+    font:800 18px/1 'Geist',sans-serif;
+    color:#24180c;
+    background:linear-gradient(135deg,#f6d7a4,#ca8731);
+    box-shadow:0 12px 32px rgba(215,154,66,.24);
+  }
+  .brand-copy{min-width:0}
+  .brand-kicker{
+    margin:0;
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--subtle);
+  }
+  .brand-name{
+    margin:2px 0 0;
+    font:700 15px/1.2 'Geist',sans-serif;
+    color:rgba(255,248,239,.95);
+  }
+  .nav-links{
+    display:flex;
+    align-items:center;
+    gap:18px;
+    font-size:13px;
+    color:var(--muted);
+  }
+  .nav-links a:hover{color:var(--text)}
+  .nav-actions{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    min-height:48px;
+    padding:0 22px;
+    border-radius:999px;
+    border:1px solid transparent;
+    font:700 14px/1 'Geist',sans-serif;
+    transition:transform .35s cubic-bezier(.16,1,.3,1),background .35s,border-color .35s,color .35s,box-shadow .35s;
+  }
+  .btn:hover{transform:translateY(-1px)}
+  .btn:active{transform:scale(.985)}
+  .btn-primary{
+    color:#24180c;
+    background:linear-gradient(135deg,#f4d5a0,#d79a42);
+    box-shadow:0 14px 32px rgba(215,154,66,.2);
+  }
+  .btn-secondary{
+    color:var(--text);
+    border-color:var(--line);
+    background:rgba(255,255,255,.04);
+  }
+  .hero{
+    padding:72px 0 30px;
+  }
+  .hero-grid{
+    display:grid;
+    grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);
+    gap:26px;
+    align-items:stretch;
+  }
+  .hero-copy{
+    padding:40px 0 18px;
+  }
+  .eyebrow{
+    margin:0 0 18px;
+    font:700 12px/1 'Geist',sans-serif;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:rgba(215,154,66,.88);
+  }
+  .hero h1{
+    margin:0;
+    max-width:11ch;
+    font-family:'Geist',sans-serif;
+    font-size:clamp(3.2rem,8vw,6.8rem);
+    line-height:.92;
+    letter-spacing:-.07em;
+    text-wrap:balance;
+  }
+  .hero h1 em{
+    font-family:'Instrument Serif',serif;
+    font-style:italic;
+    font-weight:400;
+    color:#f1ddbe;
+  }
+  .hero-lead{
+    margin:26px 0 0;
+    max-width:42rem;
+    font-size:18px;
+    line-height:1.75;
+    color:var(--muted);
+  }
+  .hero-actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:12px;
+    margin-top:28px;
+  }
+  .hero-note{
+    display:flex;
+    flex-wrap:wrap;
+    gap:16px;
+    margin-top:22px;
+    color:var(--subtle);
+    font-size:12px;
+  }
+  .hero-note span::before{
+    content:"";
+    display:inline-block;
+    width:7px;
+    height:7px;
+    margin-right:8px;
+    border-radius:999px;
+    background:rgba(215,154,66,.8);
+    box-shadow:0 0 0 5px rgba(215,154,66,.12);
+  }
+  .hero-panel{
+    position:relative;
+    overflow:hidden;
+    border-radius:32px;
+    padding:22px;
+  }
+  .hero-panel::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:
+      radial-gradient(circle at top right, rgba(215,154,66,.26), transparent 30%),
+      linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+    pointer-events:none;
+  }
+  .hero-stack{
+    position:relative;
+    display:grid;
+    gap:14px;
+  }
+  .signal{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:16px 18px;
+    border-radius:22px;
+    background:rgba(7,6,5,.52);
+    border:1px solid rgba(255,245,233,.08);
+  }
+  .signal-label{
+    margin:0 0 6px;
+    font-size:11px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--subtle);
+  }
+  .signal-title{
+    margin:0;
+    font:700 18px/1.2 'Geist',sans-serif;
+  }
+  .signal-value{
+    font:800 30px/1 'Geist',sans-serif;
+    letter-spacing:-.05em;
+    color:#f6debb;
+  }
+  .paper-grid{
+    position:relative;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px;
+  }
+  .paper{
+    min-height:180px;
+    padding:20px;
+    border-radius:26px;
+    background:var(--panel-strong);
+    color:var(--ink);
+    box-shadow:0 24px 48px rgba(0,0,0,.16);
+  }
+  .paper.cream{background:var(--panel-cream)}
+  .paper-kicker{
+    margin:0 0 12px;
+    color:rgba(27,21,16,.5);
+    font:700 11px/1 'Geist',sans-serif;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+  }
+  .paper-value{
+    margin:0;
+    font:800 clamp(2.2rem,5vw,3.4rem)/.95 'Geist',sans-serif;
+    letter-spacing:-.07em;
+  }
+  .paper-copy{
+    margin:14px 0 0;
+    font-size:14px;
+    line-height:1.6;
+    color:rgba(27,21,16,.7);
+  }
+  .section{
+    padding:38px 0;
+  }
+  .section-head{
+    display:flex;
+    align-items:end;
+    justify-content:space-between;
+    gap:20px;
+    margin-bottom:22px;
+  }
+  .section-head h2{
+    margin:6px 0 0;
+    font:700 clamp(2rem,4vw,3.4rem)/.98 'Geist',sans-serif;
+    letter-spacing:-.06em;
+  }
+  .section-head p{
+    margin:0;
+    max-width:34rem;
+    color:var(--muted);
+  }
+  .zigzag{
+    display:grid;
+    gap:20px;
+  }
+  .zig{
+    display:grid;
+    grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);
+    gap:20px;
+    align-items:stretch;
+  }
+  .zig:nth-child(even){
+    grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);
+  }
+  .zig:nth-child(even) .zig-copy{order:2}
+  .zig:nth-child(even) .zig-panel{order:1}
+  .zig-copy,
+  .zig-panel{
+    border-radius:28px;
+    padding:28px;
+  }
+  .zig-copy{
+    background:rgba(255,255,255,.035);
+    border:1px solid rgba(255,245,233,.08);
+  }
+  .zig-step{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    min-height:34px;
+    padding:0 14px;
+    border-radius:999px;
+    background:var(--amber-soft);
+    color:#f2d7ad;
+    font:700 11px/1 'Geist',sans-serif;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+  }
+  .zig-copy h3{
+    margin:18px 0 0;
+    font:700 clamp(1.8rem,3.4vw,2.8rem)/1.02 'Geist',sans-serif;
+    letter-spacing:-.05em;
+  }
+  .zig-copy h3 em{
+    font-family:'Instrument Serif',serif;
+    font-style:italic;
+    font-weight:400;
+    color:#efd8b2;
+  }
+  .zig-copy p{
+    margin:16px 0 0;
+    color:var(--muted);
+    font-size:16px;
+    line-height:1.75;
+  }
+  .zig-panel{
+    background:linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+    border:1px solid rgba(255,245,233,.09);
+  }
+  .list{
+    display:grid;
+    gap:14px;
+    margin:0;
+    padding:0;
+    list-style:none;
+  }
+  .list li{
+    padding:16px 0;
+    border-bottom:1px solid rgba(255,245,233,.08);
+  }
+  .list li:last-child{border-bottom:0}
+  .list strong{
+    display:block;
+    margin-bottom:6px;
+    font:700 17px/1.35 'Geist',sans-serif;
+    color:#fff7ed;
+  }
+  .list span{
+    color:var(--muted);
+    font-size:14px;
+  }
+  .metrics{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:14px;
+  }
+  .metric{
+    padding:20px;
+    border-radius:24px;
+    background:rgba(255,248,239,.92);
+    color:var(--ink);
+  }
+  .metric small{
+    display:block;
+    font:700 11px/1 'Geist',sans-serif;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:rgba(27,21,16,.48);
+  }
+  .metric strong{
+    display:block;
+    margin-top:12px;
+    font:800 2.6rem/.9 'Geist',sans-serif;
+    letter-spacing:-.06em;
+  }
+  .metric p{
+    margin:12px 0 0;
+    color:rgba(27,21,16,.72);
+    font-size:14px;
+  }
+  .cta{
+    padding:38px 0 84px;
+  }
+  .cta-box{
+    position:relative;
+    overflow:hidden;
+    padding:34px;
+    border-radius:34px;
+  }
+  .cta-box::before{
+    content:"";
+    position:absolute;
+    inset:auto -10% -30% auto;
+    width:320px;
+    height:320px;
+    border-radius:999px;
+    background:radial-gradient(circle, rgba(215,154,66,.28), transparent 65%);
+    pointer-events:none;
+  }
+  .cta-box h2{
+    position:relative;
+    margin:0;
+    max-width:11ch;
+    font:700 clamp(2.4rem,5vw,4.5rem)/.95 'Geist',sans-serif;
+    letter-spacing:-.06em;
+  }
+  .cta-box h2 em{
+    font-family:'Instrument Serif',serif;
+    font-style:italic;
+    font-weight:400;
+    color:#f2d6a9;
+  }
+  .cta-box p{
+    position:relative;
+    margin:16px 0 0;
+    max-width:38rem;
+    color:var(--muted);
+    font-size:17px;
+  }
+  .footer{
+    padding:0 0 36px;
+    color:var(--subtle);
+    font-size:12px;
+  }
+  .footer-row{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding-top:18px;
+    border-top:1px solid rgba(255,245,233,.08);
+  }
+  @media (max-width: 980px){
+    .nav{
+      border-radius:26px;
+      padding:14px;
+      align-items:flex-start;
+      flex-direction:column;
+    }
+    .nav-links{flex-wrap:wrap}
+    .hero-grid,
+    .zig,
+    .zig:nth-child(even),
+    .metrics,
+    .paper-grid{
+      grid-template-columns:1fr;
+    }
+    .zig:nth-child(even) .zig-copy,
+    .zig:nth-child(even) .zig-panel{order:initial}
+    .hero-copy{padding-top:12px}
+    .hero h1{max-width:12ch}
+  }
+  @media (max-width: 720px){
+    .container{width:min(100vw - 20px,1180px)}
+    .hero{padding-top:42px}
+    .hero-panel,
+    .zig-copy,
+    .zig-panel,
+    .cta-box{padding:22px}
+    .paper{min-height:auto}
+    .nav-actions{width:100%}
+    .nav-actions .btn{flex:1}
+    .hero-actions .btn{width:100%}
+  }
+</style>
+</head>
+<body>
+  <nav class="nav glass" aria-label="메인">
+    <div class="brand">
+      <div class="brand-mark">C</div>
+      <div class="brand-copy">
+        <p class="brand-kicker">Codex ops surface</p>
+        <p class="brand-name">Codex Dashboard</p>
+      </div>
+    </div>
+    <div class="nav-links">
+      <a href="#value">왜 필요한가</a>
+      <a href="#features">핵심 기능</a>
+      <a href="#workflow">복기 흐름</a>
+      <a href="/features">기능 문서</a>
+    </div>
+    <div class="nav-actions">
+      <a class="btn btn-secondary" href="#features">기능 살펴보기</a>
+      <a class="btn btn-primary" href="/login" id="primaryCta">로그인해서 시작</a>
+    </div>
+  </nav>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Codex 세션 검색과 복기를 위한 운영 화면</p>
+          <h1>흩어진 세션을 <em>읽히는 흐름</em>으로 다시 묶습니다.</h1>
+          <p class="hero-lead">
+            Codex Dashboard는 Codex CLI 세션을 수집하고, 메시지 문맥을 검색하고,
+            운영 비용과 에이전트 흐름을 다시 읽게 만드는 자체 호스팅 대시보드입니다.
+            “로그가 쌓이는 곳”이 아니라 “무슨 일이 있었는지 바로 설명되는 화면”을 목표로 합니다.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="/login" id="heroPrimaryCta">로그인해서 시작</a>
+            <a class="btn btn-secondary" href="#features">기능 살펴보기</a>
+          </div>
+          <div class="hero-note" aria-label="제품 포인트">
+            <span>세션 검색 우선</span>
+            <span>운영 복기 중심</span>
+            <span>자체 호스팅 가능</span>
+          </div>
+        </div>
+
+        <aside class="hero-panel glass" aria-label="운영 신호">
+          <div class="hero-stack">
+            <div class="signal">
+              <div>
+                <p class="signal-label">Search-first</p>
+                <p class="signal-title">메시지, 툴, 에이전트 단위로 바로 탐색</p>
+              </div>
+              <div class="signal-value">01</div>
+            </div>
+            <div class="signal">
+              <div>
+                <p class="signal-label">Replay-ready</p>
+                <p class="signal-title">앞뒤 문맥이 끊기지 않는 세션 복기</p>
+              </div>
+              <div class="signal-value">02</div>
+            </div>
+            <div class="paper-grid">
+              <article class="paper">
+                <p class="paper-kicker">오늘 상태</p>
+                <p class="paper-value">Live</p>
+                <p class="paper-copy">새 로그가 들어오면 watcher와 WebSocket 흐름으로 화면이 바로 갱신됩니다.</p>
+              </article>
+              <article class="paper cream">
+                <p class="paper-kicker">운영 관점</p>
+                <p class="paper-value">Recall</p>
+                <p class="paper-copy">세션 하나를 여는 대신, 운영 흐름과 비용 신호를 한 번에 읽습니다.</p>
+              </article>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="value">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">왜 필요한가</p>
+            <h2>Codex 작업은 길어지고, 기억은 짧아집니다.</h2>
+          </div>
+          <p>대화가 길어질수록 “어디서 막혔는지”, “어느 도구가 비용을 만들었는지”, “어떤 세션이 다시 볼 가치가 있는지”를 빠르게 찾는 일이 더 중요해집니다.</p>
+        </div>
+        <div class="metrics">
+          <article class="metric">
+            <small>Session recall</small>
+            <strong>빠르게</strong>
+            <p>프로젝트와 세션을 넘겨 가며 다시 읽지 않아도, 검색과 요약에서 바로 들어갑니다.</p>
+          </article>
+          <article class="metric">
+            <small>Context integrity</small>
+            <strong>정확하게</strong>
+            <p>메시지 하나만 보는 게 아니라 앞뒤 문맥을 붙여서, 도구 호출과 응답 흐름이 끊기지 않습니다.</p>
+          </article>
+          <article class="metric">
+            <small>Ops visibility</small>
+            <strong>가볍게</strong>
+            <p>비용, 세션 수, 에이전트 흐름, 노드 수집 상태를 운영용 표면으로 다시 정리합니다.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">핵심 기능</p>
+            <h2>화면은 강하게, 흐름은 조용하게.</h2>
+          </div>
+          <p>기능은 많아도 첫 인상은 산만하지 않아야 합니다. Codex Dashboard는 운영자가 실제로 자주 보는 축만 앞에 꺼냅니다.</p>
+        </div>
+        <div class="zigzag">
+          <section class="zig">
+            <div class="zig-copy">
+              <span class="zig-step">01 Search surface</span>
+              <h3>세션보다 먼저 <em>검색</em>으로 들어갑니다.</h3>
+              <p>메시지, 툴 호출, 에이전트 흔적을 먼저 찾고, 거기서 세션과 프로젝트로 내려갑니다. 기억에 의존하지 않고 “보였던 문장”에서 다시 시작하게 만듭니다.</p>
+            </div>
+            <div class="zig-panel glass">
+              <ul class="list">
+                <li><strong>메시지 문맥 검색</strong><span>검색 결과에서 바로 앞뒤 흐름을 확인하고, 필요한 세션으로 이동합니다.</span></li>
+                <li><strong>탐색 우선 구조</strong><span>세션과 대화를 별도 제품처럼 떼지 않고 같은 작업공간 안에 둡니다.</span></li>
+                <li><strong>명령 팔레트 연결</strong><span>이동, 검색, 빠른 액션을 같은 리듬으로 묶습니다.</span></li>
+              </ul>
+            </div>
+          </section>
+
+          <section class="zig" id="workflow">
+            <div class="zig-copy">
+              <span class="zig-step">02 Replay flow</span>
+              <h3>읽은 로그가 아니라 <em>복기 가능한 흐름</em>으로 정리합니다.</h3>
+              <p>어떤 세션이 길었고, 어느 시점에서 도구가 많이 쓰였고, 왜 다시 봐야 하는지까지 한 화면에서 이어지게 설계했습니다. 단순 저장이 아니라, 운영용 회상 구조입니다.</p>
+            </div>
+            <div class="zig-panel glass">
+              <ul class="list">
+                <li><strong>세션 리플레이</strong><span>메시지 순서와 역할, 툴 결과, thinking 블록까지 다시 읽습니다.</span></li>
+                <li><strong>프로젝트 단위 묶음</strong><span>여러 세션이 섞여도 프로젝트 축에서 다시 흐름을 복원합니다.</span></li>
+                <li><strong>후속 분석 연결</strong><span>대화에서 끝나지 않고 비용, 타임라인, agent 요약으로 이어집니다.</span></li>
+              </ul>
+            </div>
+          </section>
+
+          <section class="zig">
+            <div class="zig-copy">
+              <span class="zig-step">03 Ops signals</span>
+              <h3>운영 화면답게 <em>비용과 상태</em>를 같이 보여줍니다.</h3>
+              <p>오늘 비용, 누적 규모, 예산 소진, 수집 상태, 노드 흐름처럼 운영자가 실제로 묻는 질문을 상단 레벨에서 바로 읽게 합니다. 숫자는 장식이 아니라 판단 재료여야 합니다.</p>
+            </div>
+            <div class="zig-panel glass">
+              <ul class="list">
+                <li><strong>비용과 사용량</strong><span>일/주/월 흐름과 예측을 한 번에 비교할 수 있습니다.</span></li>
+                <li><strong>실시간 ingest</strong><span>로컬과 원격 수집 상태를 같은 표면에서 확인합니다.</span></li>
+                <li><strong>Agent summary</strong><span>subagent 흐름과 성공/실패 신호를 운영 관점으로 다시 요약합니다.</span></li>
+              </ul>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="container">
+        <div class="cta-box glass">
+          <h2>Codex 세션을 다시 <em>설명 가능한 상태</em>로 바꾸십시오.</h2>
+          <p>지금 바로 로그인해서 세션 검색, 대화 복기, 운영 신호를 같은 화면에서 확인할 수 있습니다. 문서부터 읽고 싶다면 기능 페이지를 먼저 살펴보면 됩니다.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="/login" id="footerPrimaryCta">로그인해서 시작</a>
+            <a class="btn btn-secondary" href="/features">기능 살펴보기</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-row">
+      <span>Codex Dashboard</span>
+      <span>Codex CLI 세션 수집, 검색, 복기를 위한 자체 호스팅 운영 대시보드</span>
+    </div>
+  </footer>
+
+  <script>
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data || !data.authenticated) return;
+        ['primaryCta', 'heroPrimaryCta', 'footerPrimaryCta'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.textContent = '대시보드 열기';
+          el.setAttribute('href', '/app');
+        });
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

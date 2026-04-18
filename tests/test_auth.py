@@ -151,8 +151,13 @@ def test_no_cookie_api_returns_401(auth_client):
 
 # ─── Middleware redirect vs 401 ──────────────────────────────────────
 
-def test_browser_redirect_to_login(auth_client):
-    r = auth_client.get('/', headers={'Accept': 'text/html'},
+def test_public_root_landing_bypasses_auth(auth_client):
+    r = auth_client.get('/')
+    assert r.status_code == 200
+
+
+def test_protected_app_redirects_to_login(auth_client):
+    r = auth_client.get('/app', headers={'Accept': 'text/html'},
                         follow_redirects=False)
     assert r.status_code == 302
     assert '/login' in r.headers['location']

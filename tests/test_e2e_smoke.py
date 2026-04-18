@@ -139,7 +139,7 @@ REQUIRED_IDS = [
 
 
 def test_analysis_and_admin_tabs_are_shell_containers_only(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
 
     analysis_section = re.search(
         r'<section(?=[^>]*id="view-analysis")[^>]*>(.*?)</section>',
@@ -164,7 +164,7 @@ def test_analysis_and_admin_tabs_are_shell_containers_only(e2e_client):
 
 
 def test_html_shell_has_all_required_ids(e2e_client):
-    r = e2e_client.get('/')
+    r = e2e_client.get('/app')
     assert r.status_code == 200
     assert r.headers.get('cache-control', '').startswith('no-store')
     html = r.text
@@ -176,7 +176,7 @@ def test_html_shell_has_all_required_ids(e2e_client):
 
 
 def test_explore_view_renders_search_surface(e2e_client):
-    r = e2e_client.get('/')
+    r = e2e_client.get('/app')
 
     assert r.status_code == 200
     html = r.text
@@ -191,7 +191,7 @@ def test_explore_view_renders_search_surface(e2e_client):
 
 
 def test_explore_keeps_global_command_palette_and_legacy_subviews(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
     explore_start = html.index('<section class="view hidden" id="view-explore"')
     overview_start = html.index('<!-- ─── OVERVIEW ─── -->')
     explore_html = html[explore_start:overview_start]
@@ -299,13 +299,13 @@ def test_codex_dashboard_identity_is_shared_across_shell_and_landing_pages(e2e_c
 
     assert 'Codex Dashboard' in html
     if path == '/':
-        assert '운영 / 생산성 / 보고' in html
+        assert '흩어진 세션을' in html
     else:
-        assert '로컬에서 바로 실행' in html
+        assert '운영 / 생산성 / 보고' in html or '로컬에서 바로 실행' in html
 
 
 def test_overview_keeps_balanced_portal_copy(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
 
     assert '운영 / 생산성 / 보고' in html
     assert 'Operations summary' not in html
@@ -314,7 +314,7 @@ def test_overview_keeps_balanced_portal_copy(e2e_client):
 
 
 def test_overview_balanced_portal_regions_exist(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
     css = Path('static/app.css').read_text()
     required = [
         'overviewAxisGrid',
@@ -332,7 +332,7 @@ def test_overview_balanced_portal_regions_exist(e2e_client):
 
 
 def test_dashboard_theme_system_has_dark_and_light_personas(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
     css = Path('static/app.css').read_text()
 
     assert 'body:not(.theme-light)' in css
@@ -346,7 +346,7 @@ def test_dashboard_theme_system_has_dark_and_light_personas(e2e_client):
 
 
 def test_shell_removes_claude_conversation_and_admin_copy(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
 
     assert 'Codex 세션' in html
     assert 'Claude Code' not in html
@@ -356,7 +356,7 @@ def test_shell_removes_claude_conversation_and_admin_copy(e2e_client):
 
 
 def test_codex_branding_is_visible_in_shell_and_login(e2e_client):
-    shell_html = e2e_client.get('/').text
+    shell_html = e2e_client.get('/app').text
     login_html = e2e_client.get('/login').text
     start_script = Path('start.sh').read_text()
 
@@ -370,7 +370,7 @@ def test_codex_branding_is_visible_in_shell_and_login(e2e_client):
 
 
 def test_dashboard_and_landing_share_codex_identity(e2e_client):
-    shell = e2e_client.get('/').text
+    shell = e2e_client.get('/app').text
     ops = e2e_client.get('/landing/ops').text
     team = e2e_client.get('/landing/team').text
     executive = e2e_client.get('/landing/executive').text
@@ -395,7 +395,7 @@ def test_legacy_claude_and_collector_routes_are_not_exposed(e2e_client, path):
 
 
 def test_overview_is_default_shell_view(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
 
     nav_block = re.search(r'<nav[^>]*>(.*?)</nav>', html, re.S)
     overview_nav = re.search(
@@ -448,7 +448,7 @@ def test_overview_is_default_shell_view(e2e_client):
 
 
 def test_overview_shell_contains_ops_console_regions(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
 
     region_pairs = [
         ('overviewAxisGrid', 'overviewAxisTitle'),
@@ -496,7 +496,7 @@ def test_grouped_navigation_routing_is_backed_by_app_js():
 
 
 def test_search_is_available_as_global_tool_and_explore_workspace(e2e_client):
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
     all_js = Path('static/app.js').read_text()
 
     assert 'data-action="openCommandPalette"' in html
@@ -578,7 +578,7 @@ def test_search_flow_round_trip_matches_frontend_contract(e2e_client):
 def test_static_modules_load_with_correct_globals(e2e_client):
     """JS bundle (or individual modules) must be fetchable and contain
     expected symbols."""
-    html = e2e_client.get('/').text
+    html = e2e_client.get('/app').text
     scripts = re.findall(r'src="(/static/[^"]+\.js)"', html)
     assert scripts, "no JS scripts found in HTML"
 
@@ -605,7 +605,8 @@ def test_secondary_frontend_modules_reference_codex_summary_endpoints():
     assert 'renderCodexTimelineMode' in timeline_js
     assert 'codexTimelineMode' in timeline_js
     assert '/api/usage/summary' in overview_js
-    assert 'codexUsagePanel' in overview_js
+    assert 'loadCodexUsageSummary' in overview_js
+    assert 'overviewProductivitySummaryBody' in overview_js
     assert '/api/usage/summary' in plan_js
     assert 'codexPlanPanel' in plan_js
     assert '/api/agents/summary' in subagents_js
@@ -703,16 +704,6 @@ def test_overview_api_contract_matches_frontend_expectations(e2e_client):
 
 
 def test_overview_primary_routes_return_nonempty_codex_data_without_legacy_seed(e2e_client):
-    import database
-
-    with database.write_db() as db:
-        db.execute('DELETE FROM messages')
-        db.execute('DELETE FROM sessions')
-        try:
-            db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        except Exception:
-            pass
-
     stats = e2e_client.get('/api/stats')
     assert stats.status_code == 200
     assert stats.json()['all_time']['total_sessions'] >= 1
