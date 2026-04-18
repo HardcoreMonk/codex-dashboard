@@ -39,6 +39,7 @@ def e2e_client(tmp_path, monkeypatch):
     fake_projects = tmp_path / 'projects'
     fake_projects.mkdir()
     monkeypatch.delenv('DASHBOARD_PASSWORD', raising=False)
+    monkeypatch.setenv('DASHBOARD_DISABLE_WATCHER', '1')
     try:
         from prometheus_client import REGISTRY
         for c in list(REGISTRY._collector_to_names.keys()):

@@ -24,6 +24,7 @@ def auth_client(tmp_path, monkeypatch):
 
     monkeypatch.setenv('DASHBOARD_PASSWORD', TEST_PASSWORD)
     monkeypatch.setenv('DASHBOARD_SECRET', 'fixed-test-secret-for-determinism')
+    monkeypatch.setenv('DASHBOARD_DISABLE_WATCHER', '1')
 
     try:
         from prometheus_client import REGISTRY
@@ -63,6 +64,7 @@ def noauth_client(tmp_path, monkeypatch):
     fake_projects.mkdir()
 
     monkeypatch.delenv('DASHBOARD_PASSWORD', raising=False)
+    monkeypatch.setenv('DASHBOARD_DISABLE_WATCHER', '1')
 
     try:
         from prometheus_client import REGISTRY
@@ -172,6 +174,43 @@ def test_health_bypasses_auth(auth_client):
 def test_login_page_bypasses_auth(auth_client):
     r = auth_client.get('/login')
     assert r.status_code == 200
+
+
+def test_disable_watcher_env_skips_watcher_start(tmp_path, monkeypatch):
+    db_file = tmp_path / 'watcher-disabled.db'
+    fake_projects = tmp_path / 'projects'
+    fake_projects.mkdir()
+
+    monkeypatch.setenv('DASHBOARD_DISABLE_WATCHER', '1')
+    monkeypatch.delenv('DASHBOARD_PASSWORD', raising=False)
+
+    try:
+        from prometheus_client import REGISTRY
+        for c in list(REGISTRY._collector_to_names.keys()):
+            try:
+                REGISTRY.unregister(c)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    for name in list(sys.modules):
+        if name in ('database', 'parser', 'watcher', 'codex_parser', 'codex_watcher', 'main'):
+            sys.modules.pop(name, None)
+
+    import database
+    monkeypatch.setattr(database, 'DB_PATH', db_file)
+    import codex_parser as app_parser
+    monkeypatch.setattr(app_parser, 'PROJECTS_ROOT', fake_projects)
+
+    import main
+    database.init_db()
+
+    from starlette.testclient import TestClient
+    with TestClient(main.app) as tc:
+        r = tc.get('/api/health')
+        assert r.status_code == 200
+        assert main.watcher is None
 
 
 def test_static_files_bypass_auth(auth_client):

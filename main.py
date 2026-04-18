@@ -96,6 +96,7 @@ if 'DASHBOARD_SECRET' not in os.environ:
 _SESSION_COOKIE = 'dash_session'
 _SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
 _COOKIE_SECURE = os.environ.get('DASHBOARD_SECURE', '').lower() not in ('0', 'false', '')
+_WATCHER_DISABLED = os.environ.get('DASHBOARD_DISABLE_WATCHER', '').lower() in ('1', 'true', 'yes')
 
 
 def _sign_session() -> str:
@@ -257,8 +258,12 @@ async def lifespan(app: FastAPI):
     if DB_PATH.exists() and not check_integrity():
         logger.error("DATABASE INTEGRITY CHECK FAILED — consider restoring from backup")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    watcher = CodexFileWatcher(manager.broadcast, metrics=_make_watcher_metrics())
-    await watcher.start_async()
+    watcher = None
+    if _WATCHER_DISABLED:
+        logger.info("Codex watcher disabled by DASHBOARD_DISABLE_WATCHER")
+    else:
+        watcher = CodexFileWatcher(manager.broadcast, metrics=_make_watcher_metrics())
+        await watcher.start_async()
     _sched_task = asyncio.create_task(_retention_scheduler_loop())
     yield
     if _sched_task:
@@ -267,7 +272,9 @@ async def lifespan(app: FastAPI):
             await _sched_task
         except asyncio.CancelledError:
             pass
-    watcher.stop()
+    if watcher is not None:
+        watcher.stop()
+        watcher = None
     wal_checkpoint()
     close_thread_connections()
 
