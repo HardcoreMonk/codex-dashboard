@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex Dashboard</title>
+<meta name="description" content="Codex CLI 세션 검색과 복기를 위한 웹 대시보드">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&display=swap">
+
+<!-- Tailwind CSS (built from app.css via build.js) -->
+<link rel="stylesheet" href="/static/tailwind.v79.css">
+
+<!-- Pretendard (Korean) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" integrity="sha384-zPzbVRXfR492Sd5D+HydTYCxxgHAfgVO8KERbLlpeH5unsmbAEXrscGUUqLZG9BM" crossorigin="anonymous"></script>
+<!-- Iconify Solar -->
+<script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js" integrity="sha384-63H0EhkXL6M4HAjkA3bbnT+mkm0SbHKtxxj4Iv1hXtM6FDH+c6XqvuXgDKBJdJNG" crossorigin="anonymous"></script>
+
+</head>
+
+<body class="bg-base text-white/80 min-h-[100dvh] break-keep-all">
+<div class="app-atmosphere" aria-hidden="true">
+  <div class="app-atmosphere-orb app-atmosphere-orb--mint"></div>
+  <div class="app-atmosphere-orb app-atmosphere-orb--cyan"></div>
+  <div class="app-atmosphere-grid"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     FLOATING GLASS NAVIGATION
+     ═══════════════════════════════════════════════════════════════════════ -->
+<nav class="fixed top-3 left-1/2 -translate-x-1/2 z-40
+            backdrop-blur-xl bg-white/[0.06] border border-white/[0.07]
+            rounded-full px-1.5 py-1 flex items-center gap-0.5
+            shadow-[0_8px_32px_rgba(0,0,0,.4)]">
+  <button class="nav-pill active spring px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-tight" data-view="overview">
+    <iconify-icon icon="solar:chart-square-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>개요
+  </button>
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="explore">
+    <iconify-icon icon="solar:magnifer-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>탐색
+  </button>
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="analysis">
+    <iconify-icon icon="solar:graph-up-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>분석
+  </button>
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="admin">
+    <iconify-icon icon="solar:settings-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>관리
+  </button>
+
+  <!-- WS badge -->
+  <div class="ml-2 mr-1 flex items-center gap-1.5 text-[10px] text-white/30" role="status" aria-live="polite">
+    <span class="w-1.5 h-1.5 rounded-full bg-white/20 spring" id="wsDot"
+          role="img" aria-label="WebSocket 연결 상태"></span>
+    <span id="wsLabel" class="hidden sm:inline">연결 중</span>
+  </div>
+  <!-- Theme toggle (U4) -->
+  <button id="themeToggle" data-action="toggleTheme" title="테마 전환" aria-label="테마 전환"
+          class="ml-1 w-7 h-7 rounded-full text-white/60 hover:text-white hover:bg-white/10 spring text-sm leading-none">☀</button>
+  <button id="logoutBtn" data-action="logoutDashboard" title="로그아웃" aria-label="로그아웃"
+          class="hidden ml-1 w-7 h-7 rounded-full text-white/40 hover:text-red-400 hover:bg-white/10 spring text-sm leading-none">
+    <iconify-icon icon="solar:logout-2-linear" width="14"></iconify-icon>
+  </button>
+  <!-- Command palette trigger (U7) -->
+  <button data-action="openCommandPalette" title="명령 팔레트 (Cmd+K)" aria-label="명령 팔레트"
+          class="w-7 h-7 rounded-full text-white/60 hover:text-white hover:bg-white/10 spring text-xs leading-none font-bold">⌘K</button>
+</nav>
+
+<!-- Toast tray (U2) -->
+<div id="toastTray" aria-live="polite" aria-atomic="true"></div>
+
+<!-- Persistent connection-error banner (WS down > 15s) -->
+<div id="connBanner" role="alert" aria-live="assertive"
+     class="hidden fixed top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full
+            bg-red-500/15 text-red-300 ring-1 ring-red-500/30 backdrop-blur-xl
+            text-[11px] font-semibold shadow-[0_8px_32px_rgba(0,0,0,.4)] flex items-center gap-2">
+  <iconify-icon icon="solar:wi-fi-router-round-linear" width="14"></iconify-icon>
+  <span id="connBannerMsg">실시간 연결이 끊어졌습니다. 재연결 중…</span>
+  <button data-action="forceReconnectWs"
+          class="ml-1 px-2 py-0.5 rounded-full bg-red-500/25 hover:bg-red-500/35 spring text-red-200 text-[10px] font-bold">즉시 재연결</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     MAIN CONTENT
+     ═══════════════════════════════════════════════════════════════════════ -->
+<main class="dashboard-main pt-20 pb-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+  <section class="dashboard-topbar anim-in" aria-label="대시보드 상태">
+    <div class="dashboard-topbar-copy">
+      <p class="dashboard-topbar-kicker">Codex dashboard</p>
+      <h1 class="dashboard-topbar-title">운영 상태와 탐색 흐름을 빠르게 읽는 화면입니다.</h1>
+      <p class="dashboard-topbar-description">상단은 오늘 상태와 누적 규모만 보여주고, 아래에서 바로 세션 운영 데이터로 내려갑니다.</p>
+      <div class="dashboard-topbar-signals" aria-label="주요 포인트">
+        <span class="dashboard-signal-pill">
+          <span class="dashboard-signal-dot"></span>
+          Live ingest
+        </span>
+        <span class="dashboard-signal-pill">Search-first flow</span>
+        <span class="dashboard-signal-pill">Session summaries</span>
+      </div>
+    </div>
+    <div class="dashboard-topbar-status">
+      <div class="dashboard-status-card">
+        <span class="dashboard-status-label">오늘</span>
+        <strong id="hdrToday" class="dashboard-status-value">오늘: —</strong>
+      </div>
+      <div class="dashboard-status-card">
+        <span class="dashboard-status-label">누적</span>
+        <strong id="hdrTotal" class="dashboard-status-value">전체: —</strong>
+      </div>
+      <div class="dashboard-status-card dashboard-status-card--build" aria-label="제품 정보">
+        <span class="dashboard-status-label">Surface</span>
+        <strong class="dashboard-status-value">Codex ops</strong>
+      </div>
+    </div>
+  </section>
+
+<!-- ─── EXPLORE ─── -->
+<section class="view hidden" id="view-explore" data-view="explore">
+  <div class="explore-shell dashboard-surface dashboard-surface--explore anim-in">
+    <header class="explore-shell-head">
+      <div>
+        <p class="explore-shell-kicker">Explore workspace</p>
+        <h1 class="explore-shell-title">검색 먼저, 세션과 대화는 그 다음</h1>
+        <p class="explore-shell-copy">명령 팔레트는 어디서든 열리고, 탐색은 검색에서 시작합니다. 세션과 대화는 같은 탐색 공간 안의 하위 뷰로 유지됩니다.</p>
+      </div>
+      <button data-action="openCommandPalette" class="explore-shell-action">명령 팔레트</button>
+    </header>
+
+    <div id="exploreTabs" class="explore-tabs" role="tablist" aria-label="탐색 작업공간">
+      <button class="explore-tab is-active" data-action="showExploreSubview" data-arg="search" data-explore-subview="search" role="tab" aria-selected="true">
+        <iconify-icon icon="solar:magnifer-linear" width="13"></iconify-icon>검색
+      </button>
+      <button class="explore-tab" data-action="showExploreSubview" data-arg="sessions" data-explore-subview="sessions" role="tab" aria-selected="false">
+        <iconify-icon icon="solar:list-check-linear" width="13"></iconify-icon>세션
+      </button>
+      <button class="explore-tab" data-action="showExploreSubview" data-arg="conversations" data-explore-subview="conversations" role="tab" aria-selected="false">
+        <iconify-icon icon="solar:chat-round-line-linear" width="13"></iconify-icon>대화
+      </button>
+      <span id="exploreTabSummary" class="explore-tab-summary">메시지 검색이 기본 작업면입니다.</span>
+    </div>
+
+    <section id="explore-search-surface" class="explore-surface">
+      <div class="search-shell">
+        <section class="search-main search-card">
+          <div class="search-hero">
+            <p class="search-eyebrow">Codex Dashboard</p>
+            <h1 class="search-title">검색부터 시작하는 세션 탐색</h1>
+            <p class="search-subtitle">메시지, 툴 호출, 에이전트 응답을 한 번에 찾고 오른쪽 패널에서 앞뒤 문맥을 확인합니다.</p>
+          </div>
+
+          <label for="global-search-input" class="search-label">대화 검색</label>
+          <div class="search-input-wrap">
+            <iconify-icon icon="solar:magnifer-linear" width="18" class="search-input-icon"></iconify-icon>
+            <input id="global-search-input" type="search" class="search-input"
+                   placeholder="메시지, 툴, 에이전트 문맥 검색"
+                   autocomplete="off" spellcheck="false" />
+          </div>
+
+          <div id="search-filter-bar" class="search-filter-bar">
+            <span class="search-filter-pill">Codex messages</span>
+            <span id="search-result-summary" class="search-summary">검색어를 입력하면 결과가 표시됩니다.</span>
+          </div>
+
+          <div id="search-results-panel" class="search-results-panel" aria-live="polite">
+            <div class="search-empty-state">
+              <p class="search-empty-title">검색어를 입력하세요</p>
+              <p class="search-empty-copy">최근 Codex 세션 메시지에서 일치 항목을 찾습니다.</p>
+            </div>
+          </div>
+        </section>
+
+        <aside id="search-context-panel" class="search-context-panel search-card" aria-live="polite">
+          <div class="search-empty-state">
+            <p class="search-empty-title">문맥 패널</p>
+            <p class="search-empty-copy">검색 결과를 선택하면 앞뒤 메시지 흐름이 표시됩니다.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+  </div>
+</section>
+
+<!-- ─── OVERVIEW ─── -->
+<section class="view" id="view-overview" data-view="overview">
+  <div class="overview-console dashboard-surface dashboard-surface--overview anim-in">
+    <p class="overview-balance-line">운영 / 생산성 / 보고</p>
+    <div class="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
+      <section id="overviewAxisGrid" class="overview-region" role="region" aria-labelledby="overviewAxisTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Balanced portal</p>
+            <h2 id="overviewAxisTitle" class="overview-region-title">Axis</h2>
+          </div>
+          <span class="overview-region-chip">live</span>
+        </div>
+        <div id="overviewAxisBody" class="overview-region-body">
+          <div class="overview-skeleton-grid">
+            <div class="overview-skeleton-card"></div>
+            <div class="overview-skeleton-card"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="overviewActionGrid" class="overview-region" role="region" aria-labelledby="overviewActionTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">Command surface</p>
+            <h2 id="overviewActionTitle" class="overview-region-title">Actions</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--cyan">quick</span>
+        </div>
+        <div id="overviewActionBody" class="overview-region-body">
+          <div class="overview-skeleton-grid">
+            <div class="overview-skeleton-card"></div>
+            <div class="overview-skeleton-card"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-2">
+      <section id="overviewOpsSummary" class="overview-region" role="region" aria-labelledby="overviewOpsTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">운영 요약</p>
+            <h2 id="overviewOpsTitle" class="overview-region-title">Ops</h2>
+          </div>
+          <span class="overview-region-chip">kpi</span>
+        </div>
+        <div id="overviewOpsSummaryBody" class="overview-region-body">
+          <div class="overview-skeleton-grid">
+            <div class="overview-skeleton-card"></div>
+            <div class="overview-skeleton-card"></div>
+            <div class="overview-skeleton-card"></div>
+          </div>
+          <div class="overview-skeleton-strip">
+            <div class="overview-skeleton-pill"></div>
+            <div class="overview-skeleton-pill"></div>
+            <div class="overview-skeleton-pill"></div>
+            <div class="overview-skeleton-pill"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="overviewProductivitySummary" class="overview-region" role="region" aria-labelledby="overviewProductivityTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">생산성 요약</p>
+            <h2 id="overviewProductivityTitle" class="overview-region-title">Productivity</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--amber">watch</span>
+        </div>
+        <div id="overviewProductivitySummaryBody" class="overview-region-body">
+          <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section id="overviewReportingSummary" class="overview-region" role="region" aria-labelledby="overviewReportingTitle">
+      <div class="overview-region-head">
+        <div>
+          <p class="overview-region-kicker">보고 요약</p>
+          <h2 id="overviewReportingTitle" class="overview-region-title">Reporting</h2>
+        </div>
+        <span class="overview-region-chip overview-region-chip--cyan">router</span>
+      </div>
+      <div id="overviewReportingSummaryBody" class="overview-region-body">
+        <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+          <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+          <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid gap-4 lg:grid-cols-3">
+      <section id="overviewOpsPreview" class="overview-region" role="region" aria-labelledby="overviewOpsPreviewTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">운영 미리보기</p>
+            <h2 id="overviewOpsPreviewTitle" class="overview-region-title">Top projects</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--emerald">list</span>
+        </div>
+        <div id="overviewOpsPreviewBody" class="overview-region-body">
+          <div class="overview-entry-shell">
+            <div class="overview-entry-shell__head">
+              <div>
+                <div class="overview-entry-shell__title">Top projects</div>
+                <div class="overview-entry-shell__sub">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</div>
+              </div>
+              <button data-action="openCommandPalette" class="overview-entry-shell__action">명령 팔레트</button>
+            </div>
+            <div id="topProjectsList" class="overview-project-list">
+              <div class="overview-project-empty dots">로딩 중</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="overviewProductivityPreview" class="overview-region" role="region" aria-labelledby="overviewProductivityPreviewTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">생산성 미리보기</p>
+            <h2 id="overviewProductivityPreviewTitle" class="overview-region-title">Usage</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--amber">periods</span>
+        </div>
+        <div id="overviewProductivityPreviewBody" class="overview-region-body">
+          <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="overviewReportingPreview" class="overview-region" role="region" aria-labelledby="overviewReportingPreviewTitle">
+        <div class="overview-region-head">
+          <div>
+            <p class="overview-region-kicker">보고 미리보기</p>
+            <h2 id="overviewReportingPreviewTitle" class="overview-region-title">Sources</h2>
+          </div>
+          <span class="overview-region-chip overview-region-chip--cyan">router</span>
+        </div>
+        <div id="overviewReportingPreviewBody" class="overview-region-body">
+          <div class="overview-skeleton-grid overview-skeleton-grid--compact">
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+            <div class="overview-skeleton-card overview-skeleton-card--tall"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</section>
+
+<!-- Preview drawer — fixed 위치, overview 레이아웃과 분리.
+     미리보기 버튼 클릭 시에만 translate-x-full → 0 으로 슬라이드 in -->
+<aside id="topPreviewPanel"
+       class="fixed top-20 right-0 z-40 w-full sm:w-[480px] h-[calc(100vh-96px)]
+              bg-[#0f0f0f]/95 backdrop-blur-xl ring-1 ring-white/[0.08]
+              shadow-[-12px_0_40px_rgba(0,0,0,0.5)] rounded-l-bezel
+              transition-all duration-500 ease-[cubic-bezier(.16,1,.3,1)]"
+       style="transform:translateX(100%);opacity:0;pointer-events:none"
+       role="dialog" aria-labelledby="topPreviewProject" aria-hidden="true">
+  <div class="p-5 h-full flex flex-col">
+    <!-- Header -->
+    <div class="flex items-start justify-between gap-3 border-b border-white/[0.05] pb-3">
+      <div class="min-w-0 flex-1">
+        <div id="topPreviewProject" class="text-sm font-bold text-white/90 truncate">—</div>
+        <div id="topPreviewMeta" class="text-[10px] text-white/40 mt-1 truncate">—</div>
+      </div>
+      <div class="flex items-center gap-1 flex-shrink-0">
+        <button id="topPreviewOpenModal" data-action="topPreviewOpenProjectModal"
+                class="text-[10px] px-2.5 py-1 rounded-full border border-accent/40 text-accent bg-accent/10 hover:bg-accent/20 font-bold spring">
+          프로젝트 상세 →
+        </button>
+        <button data-action="topPreviewClose"
+                class="text-white/40 hover:text-white/80 spring text-xl leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/5"
+                aria-label="닫기">&times;</button>
+      </div>
+    </div>
+    <!-- Body -->
+    <div id="topPreviewBody"
+         class="flex-1 overflow-y-auto mt-3 text-[12px] text-white/75 whitespace-pre-wrap leading-relaxed">
+    </div>
+    <!-- Footer -->
+    <div id="topPreviewFooter" class="mt-3 pt-3 border-t border-white/[0.05] flex items-center justify-between text-[9px] text-white/35">
+      <span class="flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>실시간 갱신 중</span>
+      </span>
+      <span id="topPreviewUpdatedAt">—</span>
+    </div>
+  </div>
+</aside>
+<!-- Drawer backdrop (click outside = close) -->
+<div id="topPreviewBackdrop"
+     class="fixed inset-0 z-30 bg-black/30 transition-opacity duration-300"
+     style="opacity:0;pointer-events:none"
+     data-action="topPreviewClose"></div>
+
+<!-- ─── ANALYSIS ─── -->
+<section class="view hidden" id="view-analysis" data-view="analysis">
+  <div class="dashboard-shell dashboard-shell--analysis bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <div id="analysisTabs" class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">Analysis shell</span>
+        <span class="text-[10px] text-white/30">하위 IA는 후속 작업에서 채워집니다.</span>
+      </div>
+      <p class="mt-3 text-sm text-white/45">분석 영역은 탭 컨테이너만 예약된 shell 입니다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── ADMIN ─── -->
+<section class="view hidden" id="view-admin" data-view="admin">
+  <div class="dashboard-shell dashboard-shell--admin bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <div id="adminTabs" class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">Admin shell</span>
+        <span class="text-[10px] text-white/30">운영 하위 탭은 후속 작업에서 채워집니다.</span>
+      </div>
+      <p class="mt-3 text-sm text-white/45">관리 영역은 shell 컨테이너만 남겨둡니다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── COST ─── -->
+<section class="view hidden" id="view-cost">
+
+  <!-- Hero 3카드: 오늘 비용 · 일일 예산 · 월말 예측 -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 anim-in">
+    <!-- Hero 1: 오늘 비용 -->
+    <div data-action="drillToSessionsToday" title="오늘 세션 보기"
+         class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">오늘 비용</span>
+          <iconify-icon icon="solar:arrow-right-linear" width="13" class="text-white/20"></iconify-icon>
+        </div>
+        <div class="text-2xl font-extrabold tracking-tight text-white/95 mt-2 tabular-nums skeleton" id="pdDayCost">—</div>
+        <div class="text-[10px] text-white/35 mt-1 skeleton truncate" id="pdDayDetail">—</div>
+        <div class="text-[10px] font-semibold mt-1" id="pdDayDelta"></div>
+      </div>
+    </div>
+    <!-- Hero 2: 일일 예산 -->
+    <div data-action="openPlanSettings" title="예산 설정"
+         class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel cursor-pointer hover:ring-accent/30 spring">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">일일 예산</span>
+          <iconify-icon icon="solar:settings-linear" width="13" class="text-white/20"></iconify-icon>
+        </div>
+        <div class="text-2xl font-extrabold tracking-tight mt-2 tabular-nums skeleton" id="planDailyPct" style="color:#34d399">—</div>
+        <div class="plan-bar-track mt-2"><div class="plan-bar-fill" id="planDailyBar" style="width:0;background:#34d399"></div></div>
+        <div class="flex items-center justify-between mt-2 text-[10px]">
+          <span class="text-white/40"><span class="text-white/65 font-semibold skeleton" id="planDailyUsed">—</span></span>
+          <span class="text-white/35">남은 <span class="text-white/60 font-semibold skeleton" id="planDailyRemain">—</span></span>
+        </div>
+      </div>
+    </div>
+    <!-- Hero 3: 월말 예측 -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel" title="API 사용량 기반 추정치 — 정액 플랜은 실제 청구액과 다를 수 있습니다">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">월말 예측</span>
+          <span class="text-[9px] text-amber-300/45 px-1.5 py-0.5 rounded-full bg-amber-500/[0.08] border border-amber-500/15" title="Anthropic API 과금 기준. 정액 플랜(Pro/Max)은 실제 $0 ~ $월구독료">API 기준</span>
+        </div>
+        <div class="text-2xl font-extrabold tracking-tight text-amber-400/90 mt-2 tabular-nums skeleton" id="forecastEOM">—</div>
+        <div class="text-[10px] text-white/35 mt-1 skeleton truncate" id="forecastEOMDetail">—</div>
+        <div class="text-[10px] text-white/40 mt-1">14일 평균 <span class="text-white/65 font-semibold tabular-nums skeleton" id="forecastAvg">—</span></div>
+        <div class="text-[9px] text-white/25 mt-1.5 leading-tight">※ 정액 플랜(Pro/Max)은 실제 요금과 무관</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 요약 chips -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-4 anim-in anim-d1">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
+      <div class="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-2">요약</div>
+      <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
+        <div data-action="drillToSessionsWeek" class="cursor-pointer hover:text-white/95 spring flex items-baseline gap-1.5" title="이번 주 세션 보기">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">주</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="pdWeekCost">—</span>
+          <span class="text-[9px] font-semibold" id="pdWeekDelta"></span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">월</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="pdMonthCost">—</span>
+          <span class="text-[9px] font-semibold" id="pdMonthDelta"></span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">전체</span>
+          <span class="text-white/80 font-bold tabular-nums skeleton" id="statAllCost">—</span>
+          <span class="text-white/30 text-[9px] skeleton" id="statAllSessions">—</span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5" title="캐시 히트율: 캐시 읽기 / (입력 + 캐시 읽기)">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">캐시</span>
+          <span class="text-cyan-400/85 font-bold tabular-nums skeleton" id="statCacheEff">—</span>
+          <span class="text-white/30 text-[9px] skeleton" id="statCacheSaved">—</span>
+        </div>
+        <div class="h-3 w-px bg-white/10"></div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-white/30 uppercase font-bold tracking-wider text-[9px]">burn-out</span>
+          <span class="text-[10px] skeleton" id="forecastBurnoutDaily">일간 —</span>
+          <span class="text-white/20">·</span>
+          <span class="text-[10px] skeleton" id="forecastBurnoutWeekly">주간 —</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 주간 예산 bar -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel mb-4 anim-in anim-d2">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] px-5 py-3">
+      <div class="flex justify-between items-baseline mb-2">
+        <span class="text-[10px] font-bold text-white/35 uppercase tracking-widest">주간 예산</span>
+        <span class="text-base font-extrabold tracking-tight tabular-nums skeleton" id="planWeeklyPct" style="color:#34d399">—</span>
+      </div>
+      <div class="plan-bar-track"><div class="plan-bar-fill" id="planWeeklyBar" style="width:0;background:#34d399"></div></div>
+      <div class="flex items-center justify-between mt-2 text-[10px]">
+        <span class="text-white/40"><span class="text-white/65 font-semibold skeleton" id="planWeeklyUsed">—</span></span>
+        <span class="text-white/35">남은 <span class="text-white/60 font-semibold skeleton" id="planWeeklyRemain">—</span> · 재설정 <span class="text-white/50 skeleton" id="planWeeklyReset">—</span></span>
+      </div>
+      <!-- Hidden-but-kept nodes so existing loaders still find their targets -->
+      <span class="hidden" id="planDailyTokens"></span>
+      <span class="hidden" id="planDailyMsgs"></span>
+      <span class="hidden" id="planDailyReset"></span>
+      <span class="hidden" id="planWeeklyTokens"></span>
+      <span class="hidden" id="planWeeklyMsgs"></span>
+      <span class="hidden" id="statTodayCost"></span>
+      <span class="hidden" id="statTodayMsg"></span>
+      <span class="hidden" id="statTodayTokens"></span>
+      <span class="hidden" id="statTodaySessions"></span>
+      <span class="hidden" id="statAllTokens"></span>
+      <span class="hidden" id="statAllMessages"></span>
+      <span class="hidden" id="pdDayDetail2"></span>
+      <span class="hidden" id="pdWeekDetail"></span>
+      <span class="hidden" id="pdMonthDetail"></span>
+      <span class="hidden" id="forecastAvgDetail"></span>
+    </div>
+  </div>
+
+  <!-- Charts Row 1 -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in">
+    <div class="lg:col-span-2 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold text-white/40">토큰 사용량 추이</span>
+          <div class="flex gap-1 items-center">
+            <button class="chart-range active text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/40 font-semibold spring" data-range="24h" data-action="setUsageRange" data-pass-el data-arg="24h">24시간</button>
+            <button class="chart-range text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/20 font-semibold spring" data-range="7d" data-action="setUsageRange" data-pass-el data-arg="7d">7일</button>
+            <button class="chart-range text-[10px] px-2.5 py-0.5 rounded-full border border-white/[0.07] text-white/20 font-semibold spring" data-range="30d" data-action="setUsageRange" data-pass-el data-arg="30d">30일</button>
+            <button class="text-white/25 hover:text-white/60 spring text-xs ml-1" data-action="downloadChart" data-arg0="usage" data-arg1="usage-chart.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+          </div>
+        </div>
+        <div class="chart-h"><canvas id="chartUsage"></canvas></div>
+        <div class="text-[9px] text-white/25 mt-1 text-right" data-updated-for="stats"></div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-white/40">모델별 비용</span>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="models" data-arg1="models-chart.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+        </div>
+        <div class="chart-h mt-3"><canvas id="chartModels"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Row 2 -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in anim-d1">
+    <div class="lg:col-span-2 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-white/40">일별 비용 (30일)</span>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="dailyCost" data-arg1="daily-cost.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+        </div>
+        <div class="chart-h mt-3"><canvas id="chartDailyCost"></canvas></div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-white/40">캐시 토큰 비율</span>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="cache" data-arg1="cache-chart.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+        </div>
+        <div class="chart-h mt-3"><canvas id="chartCache"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Row 3 -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4 anim-in anim-d2">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-white/40">종료 사유 분포</span>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="stopReason" data-arg1="stop-reason.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+        </div>
+        <div class="chart-h mt-3"><canvas id="chartStopReason"></canvas></div>
+      </div>
+    </div>
+    <div class="lg:col-span-2 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-white/40">모델별 캐시 히트율</span>
+          <button class="text-white/25 hover:text-white/60 spring text-xs" data-action="downloadChart" data-arg0="modelCache" data-arg1="model-cache.png" title="이미지로 내보내기" aria-label="이미지로 내보내기">⇩</button>
+        </div>
+        <div class="chart-h mt-3"><canvas id="chartModelCache"></canvas></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── SUBAGENT ANALYSIS ─── -->
+<section class="view hidden" id="view-subagents">
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-white/40">SUBAGENT 히트맵 <span class="text-white/25 font-normal">(agentType × 프로젝트)</span></span>
+        <span id="subagentHeatmapTotal" class="text-[10px] text-white/30"></span>
+      </div>
+      <div id="subagentHeatmap" class="mt-3 overflow-x-auto">
+        <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+      </div>
+    </div>
+  </div>
+  <!-- Totals + by_type summary -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3 anim-in anim-d1">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">유형별 요약</span>
+        <div id="subagentByType" class="mt-3 overflow-x-auto">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">종료 사유 분포</span>
+        <div id="subagentByStopReason" class="mt-3 overflow-x-auto">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Top by cost + duration + parents -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mt-3 anim-in anim-d2">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">비용 TOP 10</span>
+        <div id="subagentTopCost" class="mt-3 space-y-1">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">최장 소요 TOP 10</span>
+        <div id="subagentTopDuration" class="mt-3 space-y-1">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40">최다 subagent 부모</span>
+        <div id="subagentTopParents" class="mt-3 space-y-1">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3 mt-3">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <span class="text-xs font-bold text-white/40">SUBAGENT 종료 매트릭스 <span class="text-white/25 font-normal">(agentType × stop_reason)</span></span>
+      <div id="subagentSuccessMatrix" class="mt-3 overflow-x-auto">
+        <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── WORK TIMELINE (Gantt) ─── -->
+<section class="view hidden" id="view-timeline">
+  <!-- Gantt chart card -->
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+      <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">Work Timeline</span>
+        <div class="flex items-center gap-1.5 flex-wrap" id="timelineControls">
+          <button class="tl-range px-2.5 py-1 rounded-full text-[10px] font-semibold spring border" data-range="today">오늘</button>
+          <button class="tl-range active bg-accent/15 text-accent border-accent/30 px-2.5 py-1 rounded-full text-[10px] font-semibold spring border" data-range="7d">7일</button>
+          <button class="tl-range px-2.5 py-1 rounded-full text-[10px] font-semibold spring border" data-range="14d">14일</button>
+          <button class="tl-range px-2.5 py-1 rounded-full text-[10px] font-semibold spring border" data-range="30d">30일</button>
+          <input type="date" id="tlDateFrom" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="시작 날짜">
+          <span class="text-white/20 text-[10px]">~</span>
+          <input type="date" id="tlDateTo" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="종료 날짜">
+          <select id="tlNodeFilter" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60 ml-1" aria-label="노드 필터">
+            <option value="">전체 노드</option>
+          </select>
+          <label class="text-[10px] text-white/30 flex items-center gap-1 ml-1 cursor-pointer select-none">
+            <input type="checkbox" id="tlShowSubagents" class="cursor-pointer"> Subagents
+          </label>
+          <label class="text-[10px] text-white/30 flex items-center gap-1 cursor-pointer select-none" title="부모→자식 에이전트 연결선">
+            <input type="checkbox" id="tlShowLinks" class="cursor-pointer"> 연결
+          </label>
+          <label class="text-[10px] text-white/30 flex items-center gap-1 cursor-pointer select-none" title="$/hr 이상치 강조">
+            <input type="checkbox" id="tlShowOutliers" class="cursor-pointer" checked> 이상치
+          </label>
+          <button id="tlResetZoom" class="hidden px-2 py-1 rounded-full text-[10px] font-semibold spring border border-amber-500/30 bg-amber-500/10 text-amber-300 ml-1">줌 리셋</button>
+        </div>
+      </div>
+      <div class="relative" id="timelineChartWrap" style="min-height:200px;">
+        <canvas id="chartTimeline"></canvas>
+      </div>
+      <div class="flex items-center gap-4 mt-3 text-[10px] text-white/30 flex-wrap" id="timelineLegend"></div>
+    </div>
+  </div>
+  <!-- Hover detail card (positioned absolutely) -->
+  <div id="tlHoverCard" class="hidden fixed z-50 bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-xl shadow-[0_10px_30px_rgba(0,0,0,.6)] p-3 w-72 text-[11px] pointer-events-none"></div>
+  <!-- Row 2: Heatmap + Efficiency + Concurrency -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+    <!-- Heatmap card -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d1">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">요일 × 시간 히트맵</span>
+        <div class="text-[9px] text-white/20 mt-0.5">셀 클릭 시 해당 시간대 상세 보기</div>
+        <div id="tlHeatmapWrap" class="mt-3 overflow-x-auto">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+        <div id="tlHeatmapDrill" class="hidden mt-3 border-t border-white/[0.05] pt-3"></div>
+      </div>
+    </div>
+    <!-- Efficiency card -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d2">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">프로젝트 효율 분석</span>
+        <div id="tlEfficiency" class="mt-3">
+          <div class="text-center text-white/15 text-xs py-8 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Row 2.5: Hourly stacked bar chart -->
+  <div class="mt-3">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold text-white/40 uppercase tracking-widest">시간별 작업량</span>
+          <div class="flex items-center gap-2">
+            <select id="tlHourlyMetric" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="메트릭 선택">
+              <option value="cost">비용</option>
+              <option value="messages">메시지 수</option>
+              <option value="tokens">토큰</option>
+            </select>
+            <input type="date" id="tlHourlyDate" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="날짜 선택">
+          </div>
+        </div>
+        <div class="relative" style="height:220px;">
+          <canvas id="chartHourlyStacked"></canvas>
+        </div>
+        <div class="text-[9px] text-white/20 mt-2 text-center" id="tlHourlyLegend"></div>
+      </div>
+    </div>
+  </div>
+  <!-- Row 3: Daily report + Trend comparison -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+    <!-- Daily report -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold text-white/40 uppercase tracking-widest">일간 리포트</span>
+          <input type="date" id="tlReportDate" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="리포트 날짜">
+        </div>
+        <div id="tlDailyReport">
+          <div class="text-center text-white/15 text-xs py-6">날짜를 선택하세요</div>
+        </div>
+      </div>
+    </div>
+    <!-- Trend comparison -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d4">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <span class="text-xs font-bold text-white/40 uppercase tracking-widest">이번 주 vs 저번 주</span>
+        <div class="relative chart-h mt-3">
+          <canvas id="chartTrend"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Row 4: Delta view (yesterday → today) -->
+  <div class="mt-3">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d4">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-4">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-white/40 uppercase tracking-widest">어제 → 오늘 델타</span>
+            <span class="text-[9px] text-white/20" id="tlDeltaRange"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="date" id="tlDeltaDate" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60" aria-label="기준일">
+            <button id="tlDeltaRefresh" class="text-[10px] text-white/40 hover:text-accent spring px-2 py-1 rounded-full border border-white/[0.07]" title="새로고침">↻</button>
+          </div>
+        </div>
+        <div id="tlDeltaSummary" class="grid grid-cols-4 gap-2 mb-3"></div>
+        <div id="tlDeltaBody">
+          <div class="text-center text-white/15 text-xs py-6 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="explore-legacy-workspace" class="explore-legacy-workspace hidden view">
+<!-- ─── SESSIONS ─── -->
+<section class="view hidden" id="view-sessions" data-view="sessions">
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+      <div class="px-5 py-3 border-b border-white/[0.05]">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <span class="text-xs font-bold text-white/40 whitespace-nowrap">전체 세션</span>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button id="sessionsPinToggle" data-action="toggleSessionsPinnedOnly"
+                    class="text-xs font-semibold px-3 py-1 rounded-full border border-white/[0.07] text-white/30 hover:text-accent spring"
+                    title="핀 고정된 세션만 보기">★ 핀만</button>
+            <button data-action="toggleAdvFilters" id="advFiltersToggle"
+                    class="text-xs font-semibold px-3 py-1 rounded-full border border-white/[0.07] text-white/30 hover:text-white/80 spring flex items-center gap-1"
+                    title="고급 필터">
+              <iconify-icon icon="solar:filter-linear" width="12"></iconify-icon> 필터
+            </button>
+            <input id="sessionSearch" placeholder="검색…" oninput="searchSessions(this.value)"
+                   class="bg-white/5 border border-white/[0.07] rounded-full px-3 py-1 text-xs text-white/60 placeholder:text-white/20 outline-none focus:border-accent/30 spring w-44">
+          </div>
+        </div>
+        <!-- Advanced filter drawer (U11 + U12) -->
+        <div id="advFiltersPanel" class="hidden mt-3 p-3 bg-white/[0.02] ring-1 ring-white/[0.06] rounded-xl">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">시작일</label>
+              <input type="date" id="advDateFrom" oninput="applyAdvFilters()" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+            </div>
+            <div>
+              <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">종료일</label>
+              <input type="date" id="advDateTo" oninput="applyAdvFilters()" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+            </div>
+            <div>
+              <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">최소 비용 ($)</label>
+              <input type="number" id="advCostMin" min="0" step="0.01" placeholder="0" oninput="applyAdvFilters()" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+            </div>
+            <div>
+              <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">최대 비용 ($)</label>
+              <input type="number" id="advCostMax" min="0" step="0.01" placeholder="∞" oninput="applyAdvFilters()" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+            </div>
+            <div>
+              <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">노드</label>
+              <select id="advNodeFilter" onchange="applyAdvFilters()" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+                <option value="">전체 노드</option>
+              </select>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center justify-between gap-2 flex-wrap">
+            <span id="advFiltersSummary" class="text-[10px] text-white/35 flex-1"></span>
+            <!-- Filter presets (B2) -->
+            <div class="flex items-center gap-1.5">
+              <select id="presetSelect" onchange="applyPreset(this.value)"
+                      class="bg-white/5 border border-white/[0.07] rounded-full px-2 py-1 text-[10px] text-white/65 outline-none focus:border-accent/30 spring">
+                <option value="">프리셋 선택…</option>
+              </select>
+              <button data-action="saveCurrentPreset" class="text-[10px] px-2 py-1 rounded-full bg-accent/10 text-accent border border-accent/25 hover:scale-[1.02] spring">+ 저장</button>
+              <button onclick="(()=>{const s=document.getElementById('presetSelect');if(s.value)deletePreset(s.value)})()" class="text-[10px] px-2 py-1 rounded-full text-white/40 hover:text-red-400 border border-white/[0.07] spring">✕</button>
+            </div>
+            <button data-action="clearAdvFilters" class="text-[10px] text-white/40 hover:text-red-400 spring">필터 초기화</button>
+          </div>
+        </div>
+      </div>
+      <!-- Bulk action bar (B1) — only visible when ≥1 session is selected -->
+      <div id="bulkActionBar" class="hidden px-5 py-2 bg-accent/[0.06] border-b border-accent/20 flex items-center gap-2 text-[11px]">
+        <span class="text-accent font-bold" data-bulk-count>0개 선택됨</span>
+        <span class="flex-1"></span>
+        <button data-action="bulkPin" data-arg="true" class="px-3 py-1 rounded-full bg-white/5 text-white/65 hover:text-accent border border-white/[0.07] spring text-[10px] font-semibold">★ 핀</button>
+        <button data-action="bulkPin" data-arg="false" class="px-3 py-1 rounded-full bg-white/5 text-white/65 hover:text-white border border-white/[0.07] spring text-[10px] font-semibold">☆ 해제</button>
+        <button data-action="bulkTag" class="px-3 py-1 rounded-full bg-white/5 text-cyan-300 hover:scale-[1.02] border border-cyan-500/30 spring text-[10px] font-semibold">🏷 태그</button>
+        <button data-action="bulkCompare" class="px-3 py-1 rounded-full bg-white/5 text-amber-300 hover:scale-[1.02] border border-amber-500/30 spring text-[10px] font-semibold">⚖ 비교 (2개)</button>
+        <button data-action="bulkDelete" class="px-3 py-1 rounded-full bg-red-500/10 text-red-300 hover:scale-[1.02] border border-red-500/30 spring text-[10px] font-semibold">✕ 삭제</button>
+        <button data-action="bulkClear" class="px-3 py-1 rounded-full text-white/40 hover:text-white/80 border border-white/[0.07] spring text-[10px]">취소</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-[13px]">
+          <thead id="sessionsThead"></thead>
+          <tbody id="sessionsBody" class="text-white/65"></tbody>
+        </table>
+      </div>
+      <div id="sessionsPagination" class="px-5 py-2 border-t border-white/[0.05] flex items-center gap-2"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── CONVERSATIONS ─── -->
+<section class="view hidden" id="view-conversations" data-view="conversations">
+  <div class="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-3 min-h-[70vh] anim-in">
+    <!-- List -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] rounded-bezel overflow-hidden flex flex-col">
+      <div class="px-3 py-2 border-b border-white/[0.05]">
+        <input id="convSearch" placeholder="대화 내용 검색…" oninput="searchConversations(this.value)"
+               class="w-full bg-white/5 border border-white/[0.07] rounded-full px-3 py-1 text-[10px] text-white/50 placeholder:text-white/15 outline-none focus:border-accent/30 spring">
+      </div>
+      <div id="convSearchResults" role="region" aria-live="polite" class="hidden border-b border-white/[0.05] max-h-48 overflow-y-auto"></div>
+      <div class="px-3 py-1.5 border-b border-white/[0.04] flex items-center gap-1">
+        <button data-conv-source="codex" data-action="switchConvSource" data-arg="codex"
+                class="conv-source-btn active flex-1 px-2 py-0.5 rounded-full text-[9px] font-bold spring">Codex 세션</button>
+      </div>
+      <div class="px-3 py-1.5 border-b border-white/[0.04] flex items-center justify-between gap-2">
+        <span id="convListLabel" class="text-[9px] font-bold text-white/35 uppercase tracking-widest">세션 목록</span>
+        <div id="convSortBar" class="flex items-center gap-0.5"></div>
+      </div>
+      <div id="convListBody" class="flex-1 overflow-y-auto"></div>
+    </div>
+    <!-- Viewer -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel flex flex-col overflow-hidden">
+      <div id="convViewerHeader" class="bg-white/[0.02] rounded-t-bezel-inner px-5 py-3 border-b border-white/[0.05]">
+        <div class="text-xs text-white/20 text-center py-8">&larr; 세션을 선택하세요</div>
+      </div>
+      <!-- Stats summary bar -->
+      <div id="convStatsSummary" class="hidden px-4 py-1.5 border-b border-white/[0.04] flex items-center gap-3 text-[10px] bg-white/[0.02] flex-wrap"></div>
+      <!-- Navigation toolbar (U8) — visible only when a session is open -->
+      <div id="convNavBar" class="hidden px-4 py-2 border-b border-white/[0.04] flex items-center gap-2 text-[10px] bg-white/[0.02] flex-wrap">
+        <span class="text-white/30">보기</span>
+        <button data-role-filter="all" class="conv-role-btn px-2 py-0.5 rounded-full border border-accent/40 bg-accent/15 text-accent font-bold">전체</button>
+        <button data-role-filter="user" class="conv-role-btn px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">사용자</button>
+        <button data-role-filter="assistant" class="conv-role-btn px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">어시스턴트</button>
+        <span class="mx-1 text-white/15">|</span>
+        <button data-action="convCollapseAllTools" class="hide-mobile px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">모두 접기</button>
+        <button data-action="convExpandAllTools" class="hide-mobile px-2 py-0.5 rounded-full border border-white/[0.07] text-white/50 hover:text-white/80">모두 펼치기</button>
+        <span class="mx-1 text-white/15">|</span>
+        <input id="convInlineSearch" placeholder="대화 내 검색…"
+               class="bg-white/5 border border-white/[0.07] rounded-full px-2.5 py-0.5 text-[10px] text-white/50 placeholder:text-white/15 outline-none focus:border-accent/30 spring w-28">
+        <span id="convSearchMatchInfo" class="text-[9px] text-white/30 tabular-nums"></span>
+        <button data-action="convSearchPrev" title="이전 매치" class="text-white/40 hover:text-white/70 text-[10px] spring">&lsaquo;</button>
+        <button data-action="convSearchNext" title="다음 매치" class="text-white/40 hover:text-white/70 text-[10px] spring">&rsaquo;</button>
+        <span class="flex-1"></span>
+        <span id="convMsgCount" class="text-white/30 tabular-nums"></span>
+        <button data-action="convCopyMarkdown" title="마크다운 복사" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring text-[11px]">&#x1F4CB;</button>
+        <button data-action="convDownloadMarkdown" title="마크다운 다운로드" class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring text-[11px]">&#x1F4BE;</button>
+        <button data-action="convJumpTop" title="처음으로" class="hide-mobile w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">&uarr;</button>
+        <button data-action="convJumpBottom" title="끝으로" class="hide-mobile w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-white/60 spring">&darr;</button>
+      </div>
+      <div id="convMessages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-white/[0.01] rounded-b-bezel-inner"></div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<!-- ─── MODELS ─── -->
+<section class="view hidden" id="view-models">
+  <div id="modelsSortBar" class="flex items-center gap-1.5 mb-3 anim-in flex-wrap"></div>
+  <div id="modelsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 anim-in anim-d1"></div>
+</section>
+
+<!-- ─── PROJECTS ─── -->
+<section class="view hidden" id="view-projects">
+  <div class="px-1 mb-2 text-[10px] text-white/30 anim-in">
+    <iconify-icon icon="solar:info-circle-linear" width="12" class="align-[-2px] mr-1"></iconify-icon>
+    행을 클릭하면 해당 프로젝트의 대화 내용을 볼 수 있습니다
+  </div>
+  <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d1">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+      <table class="w-full text-[13px]">
+        <thead id="projectsThead"></thead>
+        <tbody id="projectsBody" class="text-white/65"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ─── EXPORT / ADMIN ─── -->
+<section class="view hidden" id="view-export">
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 anim-in">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="text-xs font-bold text-white/40 mb-3">내보내기</div>
+        <div class="flex gap-2">
+          <button data-action="exportCSV" class="rounded-full px-4 py-2 text-xs font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">CSV</button>
+          <button data-action="exportJSON" class="rounded-full px-4 py-2 text-xs font-semibold bg-white/5 text-white/40 border border-white/[0.07] hover:scale-[1.02] active:scale-[0.98] spring">JSON</button>
+        </div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="text-xs font-bold text-white/40 mb-1">백업</div>
+        <div class="text-[10px] text-white/20 mb-3">DB 크기: <span id="dbSizeLabel">—</span></div>
+        <div class="flex gap-2">
+          <button data-action="createBackup" class="rounded-full px-4 py-2 text-xs font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">백업 생성</button>
+          <button data-action="runDbCompact" class="rounded-full px-4 py-2 text-xs font-semibold bg-white/5 text-white/50 border border-white/[0.07] hover:scale-[1.02] active:scale-[0.98] spring">DB 정리</button>
+        </div>
+        <div id="backupResult" class="text-[10px] text-white/20 mt-2"></div>
+        <div id="compactResult" class="text-[10px] text-white/20 mt-1"></div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="text-xs font-bold text-white/40 mb-1">데이터 보존</div>
+        <div class="text-[10px] text-white/20 mb-3">오래된 세션/메시지 삭제</div>
+        <div class="flex items-center gap-2">
+          <input type="number" id="retentionDays" value="90" min="7" max="3650"
+                 class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-xs text-white/50 w-16 outline-none focus:border-accent/30">
+          <span class="text-[10px] text-white/20">일</span>
+          <button data-action="runRetention" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:scale-[1.02] active:scale-[0.98] spring">삭제</button>
+        </div>
+        <div id="retentionResult" class="text-[10px] text-white/20 mt-2"></div>
+      </div>
+    </div>
+  </div>
+  <!-- Remote nodes management -->
+  <div class="mt-3 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d1">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <div class="text-xs font-bold text-white/40">원격 노드</div>
+          <div class="text-[10px] text-white/20 mt-0.5">다른 서버의 Codex 세션 데이터를 수집합니다</div>
+        </div>
+        <button data-action="openNodeRegister" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">+ 노드 추가</button>
+      </div>
+      <div id="nodeList" class="text-[11px]">
+        <div class="text-center text-white/15 text-xs py-4 dots">로딩 중</div>
+      </div>
+      <div id="nodeRegisterForm" class="hidden mt-3 p-3 bg-white/[0.03] rounded-xl ring-1 ring-white/[0.06]">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">노드 ID</label>
+            <input id="nodeIdInput" placeholder="server-prod-1" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring" pattern="[a-zA-Z0-9_\-]+">
+          </div>
+          <div>
+            <label class="text-[10px] text-white/40 uppercase font-bold tracking-widest">라벨 (선택)</label>
+            <input id="nodeLabelInput" placeholder="Production Server" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+          </div>
+        </div>
+        <div class="flex items-center gap-2 mt-3">
+          <button data-action="submitNodeRegister" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">등록</button>
+          <button onclick="document.getElementById('nodeRegisterForm').classList.add('hidden')" class="rounded-full px-3 py-1.5 text-[10px] font-semibold text-white/40 border border-white/[0.07] hover:text-white/60 spring">취소</button>
+        </div>
+        <div id="nodeRegisterResult" class="mt-2 text-[10px] text-white/30"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard status + Retention scheduler (side by side) -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+    <!-- Dashboard status -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d2">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <div class="text-xs font-bold text-white/40">대시보드 상태</div>
+            <div class="text-[10px] text-white/20 mt-0.5">실시간 프로세스 & DB 지표</div>
+          </div>
+          <button data-action="refreshAdminStatus" class="text-[10px] text-white/40 hover:text-accent spring px-2 py-1 rounded-full border border-white/[0.07]">↻</button>
+        </div>
+        <div id="adminStatusBody" class="text-[11px]">
+          <div class="text-center text-white/15 text-xs py-4 dots">로딩 중</div>
+        </div>
+      </div>
+    </div>
+    <!-- Retention scheduler -->
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <div class="text-xs font-bold text-white/40">보존 스케줄</div>
+            <div class="text-[10px] text-white/20 mt-0.5">오래된 세션을 주기적으로 삭제</div>
+          </div>
+          <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" id="schedEnabled" class="cursor-pointer">
+            <span class="text-[10px] text-white/60" id="schedEnabledLabel">비활성</span>
+          </label>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          <div>
+            <label class="text-[9px] text-white/30 uppercase tracking-widest font-bold">주기 (시간)</label>
+            <input type="number" id="schedInterval" min="1" max="720" value="24"
+                   class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+          </div>
+          <div>
+            <label class="text-[9px] text-white/30 uppercase tracking-widest font-bold">보존 기간 (일)</label>
+            <input type="number" id="schedDays" min="7" max="3650" value="90"
+                   class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+          </div>
+        </div>
+        <button data-action="saveSchedule" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">저장</button>
+        <div id="schedMeta" class="text-[10px] text-white/30 mt-3 space-y-0.5"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audit log -->
+  <div class="mt-3 bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d4">
+    <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <div class="text-xs font-bold text-white/40">감사 로그</div>
+          <div class="text-[10px] text-white/20 mt-0.5">백업/삭제/노드 관리 등 관리자 액션 이력</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <select id="auditAction" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1 text-[10px] text-white/60">
+            <option value="">전체</option>
+            <option value="backup">backup</option>
+            <option value="db_compact">db_compact</option>
+            <option value="retention">retention</option>
+            <option value="retention_scheduled">retention_scheduled</option>
+            <option value="retention_schedule_update">retention_schedule_update</option>
+            <option value="node_register">node_register</option>
+            <option value="node_delete">node_delete</option>
+            <option value="node_rotate_key">node_rotate_key</option>
+          </select>
+          <button data-action="refreshAudit" class="text-[10px] text-white/40 hover:text-accent spring px-2 py-1 rounded-full border border-white/[0.07]">↻</button>
+        </div>
+      </div>
+      <div id="auditLogBody" class="text-[11px] overflow-x-auto">
+        <div class="text-center text-white/15 text-xs py-4 dots">로딩 중</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     PLAN SETTINGS MODAL
+     ═══════════════════════════════════════════════════════════════════════ -->
+<!-- Project Detail Modal (tabbed) -->
+<div id="projectModal" style="display:none" role="dialog" aria-modal="true"
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+     onclick="if(event.target===this)closeProjectModal()">
+  <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[1100px] max-w-[95vw] h-[88vh] flex flex-col shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
+    <!-- Header -->
+    <div class="flex items-start justify-between px-6 py-4 border-b border-white/[0.06] flex-shrink-0">
+      <div class="min-w-0 flex-1">
+        <div class="text-[10px] text-white/35 uppercase tracking-widest font-bold">프로젝트</div>
+        <div class="text-base font-bold text-white/90 truncate mt-0.5" id="projModalTitle">—</div>
+        <div class="text-[10px] text-white/30 truncate mt-0.5" id="projModalPath">—</div>
+      </div>
+      <button data-action="closeProjectModal" class="text-white/30 hover:text-white/70 spring text-2xl leading-none ml-4" title="닫기 (Esc)">&times;</button>
+    </div>
+    <!-- Tabs -->
+    <div class="flex items-center gap-1 px-6 pt-3 border-b border-white/[0.06] flex-shrink-0" role="tablist" aria-label="프로젝트 상세 탭">
+      <button class="proj-tab active px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-accent border-b-2 border-accent -mb-px spring" data-tab="overview" role="tab" aria-selected="true" aria-controls="projTabContent">
+        <iconify-icon icon="solar:chart-linear" width="13" class="align-[-2px] mr-1"></iconify-icon>통계
+      </button>
+      <button class="proj-tab px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-white/35 hover:text-white/65 border-b-2 border-transparent -mb-px spring" data-tab="sessions" role="tab" aria-selected="false" aria-controls="projTabContent">
+        <iconify-icon icon="solar:list-check-linear" width="13" class="align-[-2px] mr-1"></iconify-icon>세션 목록
+      </button>
+      <button class="proj-tab px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-white/35 hover:text-white/65 border-b-2 border-transparent -mb-px spring" data-tab="conversations" role="tab" aria-selected="false" aria-controls="projTabContent">
+        <iconify-icon icon="solar:chat-round-line-linear" width="13" class="align-[-2px] mr-1"></iconify-icon>전체 대화
+      </button>
+    </div>
+    <!-- Content -->
+    <div id="projTabContent" class="flex-1 overflow-y-auto p-6 bg-white/[0.01]" role="tabpanel" aria-live="polite">
+      <div class="text-center text-white/25 text-xs py-10 dots">로딩 중</div>
+    </div>
+  </div>
+</div>
+
+<div id="planModal" style="display:none" role="dialog" aria-modal="true"
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+     onclick="if(event.target===this)closePlanSettings()">
+  <div class="bg-[#111] ring-1 ring-white/[0.08] rounded-2xl w-[420px] max-w-[92vw] max-h-[90vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,.5)] anim-in">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
+      <span class="text-sm font-bold text-white/80">설정</span>
+      <button data-action="closePlanSettings" class="text-white/20 hover:text-white/50 spring text-lg">&times;</button>
+    </div>
+    <!-- Settings sub-tabs (U17) -->
+    <div class="flex items-center gap-1 px-5 pt-3 border-b border-white/[0.06]">
+      <button data-settings-tab="plan" class="settings-tab px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-accent border-b-2 border-accent -mb-px spring">플랜·예산</button>
+      <button data-settings-tab="display" class="settings-tab px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white/35 hover:text-white/65 border-b-2 border-transparent -mb-px spring">표시</button>
+    </div>
+    <div id="settingsTabPlan" class="p-5 space-y-3">
+      <div>
+        <div class="text-[10px] font-bold text-white/25 uppercase tracking-widest mb-1.5">플랜 프리셋</div>
+        <div class="flex gap-1.5">
+          <button data-action="applyPlanPreset" data-arg="pro" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Pro</button>
+          <button data-action="applyPlanPreset" data-arg="max5x" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Max 5x</button>
+          <button data-action="applyPlanPreset" data-arg="max20x" class="rounded-full px-3 py-1 text-[10px] font-semibold bg-white/5 text-white/30 border border-white/[0.07] hover:text-white/60 spring">Max 20x</button>
+          <span id="planDetectedHint" class="text-[9px] text-white/15 self-center ml-2"></span>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] font-bold text-white/25 uppercase tracking-widest">일일 예산 ($)</label>
+          <input type="number" id="cfgDailyLimit" value="50" min="0" step="1"
+                 class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-3 py-2 text-xs text-white/60 outline-none focus:border-accent/30 spring">
+        </div>
+        <div>
+          <label class="text-[10px] font-bold text-white/25 uppercase tracking-widest">주간 예산 ($)</label>
+          <input type="number" id="cfgWeeklyLimit" value="300" min="0" step="1"
+                 class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-3 py-2 text-xs text-white/60 outline-none focus:border-accent/30 spring">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] font-bold text-white/25 uppercase tracking-widest">재설정 시각</label>
+          <select id="cfgResetHour" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-3 py-2 text-xs text-white/60 outline-none spring"></select>
+        </div>
+        <div>
+          <label class="text-[10px] font-bold text-white/25 uppercase tracking-widest">주간 재설정 요일</label>
+          <select id="cfgResetWeekday" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-3 py-2 text-xs text-white/60 outline-none spring">
+            <option value="0">월요일</option><option value="1">화요일</option><option value="2">수요일</option>
+            <option value="3">목요일</option><option value="4">금요일</option><option value="5">토요일</option><option value="6">일요일</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-[10px] font-bold text-white/25 uppercase tracking-widest">시간대</label>
+        <select id="cfgTimezone" class="mt-1 w-full bg-white/5 border border-white/[0.07] rounded-lg px-3 py-2 text-xs text-white/60 outline-none spring">
+          <option value="-12">UTC-12</option><option value="-11">UTC-11</option><option value="-10">UTC-10</option>
+          <option value="-9">UTC-9</option><option value="-8">UTC-8</option><option value="-7">UTC-7</option>
+          <option value="-6">UTC-6</option><option value="-5">UTC-5</option><option value="-4">UTC-4</option>
+          <option value="-3">UTC-3</option><option value="-2">UTC-2</option><option value="-1">UTC-1</option>
+          <option value="0">UTC</option><option value="1">UTC+1</option><option value="2">UTC+2</option>
+          <option value="3">UTC+3</option><option value="4">UTC+4</option><option value="5">UTC+5</option>
+          <option value="6">UTC+6</option><option value="7">UTC+7</option><option value="8">UTC+8</option>
+          <option value="9" selected>UTC+9 (KST)</option><option value="10">UTC+10</option>
+          <option value="11">UTC+11</option><option value="12">UTC+12</option>
+        </select>
+      </div>
+    </div>
+    <!-- Display settings tab -->
+    <div id="settingsTabDisplay" class="hidden p-5 space-y-3">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-xs font-semibold text-white/80">테마</div>
+          <div class="text-[10px] text-white/30">다크 / 라이트 전환</div>
+        </div>
+        <button data-action="toggleTheme" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">전환</button>
+      </div>
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-xs font-semibold text-white/80">알림 허용</div>
+          <div class="text-[10px] text-white/30">작업 완료 브라우저 알림</div>
+        </div>
+        <button onclick="if('Notification' in window)Notification.requestPermission().then(p=>showToast('알림: '+p,{type:'info'}))" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">요청</button>
+      </div>
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-xs font-semibold text-white/80">입력 대기 뱃지 + 차임</div>
+          <div class="text-[10px] text-white/30">assistant end_turn 감지 시 TOP 5 행의 프로젝트 이름 좌측에 ⏳ 입력 대기 뱃지 + 짧은 차임 소리 (C5→G5)</div>
+        </div>
+        <button id="idleNotifyToggle" data-action="toggleIdleNotify"
+                class="rounded-full px-4 py-1.5 text-[11px] font-bold spring">—</button>
+      </div>
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-xs font-semibold text-white/80">저장된 환경설정 초기화</div>
+          <div class="text-[10px] text-white/30">정렬·필터·뷰 기본값 복원</div>
+        </div>
+        <button onclick="if(confirm('모든 환경설정을 초기화합니다.')){localStorage.removeItem('codex-dashboard-prefs-v1');location.reload()}" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-red-500/10 text-red-400 border border-red-500/20 hover:scale-[1.02] spring">초기화</button>
+      </div>
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-xs font-semibold text-white/80">키보드 단축키</div>
+          <div class="text-[10px] text-white/30">전체 목록 보기</div>
+        </div>
+        <button data-action="showKbdHelp" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">?</button>
+      </div>
+    </div>
+    <div class="px-5 py-3 border-t border-white/[0.06] flex justify-end gap-2">
+      <button data-action="closePlanSettings" class="rounded-full px-4 py-1.5 text-xs font-semibold text-white/30 border border-white/[0.07] hover:text-white/50 spring">취소</button>
+      <button data-action="savePlanConfig" class="rounded-full px-4 py-1.5 text-xs font-semibold bg-accent/15 text-accent border border-accent/25 hover:scale-[1.02] active:scale-[0.98] spring">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- Scan progress toast -->
+<div id="scanProgress" class="fixed bottom-5 right-5 z-50 hidden bg-[#111] ring-1 ring-white/[0.08] rounded-xl px-4 py-3 text-xs text-white/40 shadow-[0_10px_40px_rgba(0,0,0,.5)]">
+  <span id="scanProgressText" class="dots">스캔 중</span>
+</div>
+
+<!-- Tag edit modal (replaces window.prompt for reliability) -->
+<div id="tagEditModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+     onclick="if(event.target===this)closeTagEdit()" role="dialog" aria-modal="true" aria-labelledby="tagEditTitle">
+  <div class="bg-[#0f0f0f] ring-1 ring-cyan-500/25 rounded-2xl w-[440px] max-w-[94vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
+    <div class="px-5 py-3 border-b border-cyan-500/20 bg-cyan-500/[0.06] flex items-center gap-2">
+      <iconify-icon icon="solar:tag-linear" width="18" class="text-cyan-300"></iconify-icon>
+      <span class="text-sm font-bold text-cyan-200" id="tagEditTitle">세션 태그 편집</span>
+    </div>
+    <div class="p-5 space-y-3">
+      <div class="text-[10px] text-white/40 uppercase tracking-widest font-bold" id="tagEditTarget">세션</div>
+      <input id="tagEditInput" type="text" autocomplete="off" spellcheck="false"
+             placeholder="콤마로 구분해 입력 (예: wip, backend)"
+             class="w-full bg-white/5 border border-white/[0.10] rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-cyan-400/40">
+      <div class="text-[10px] text-white/30">콤마로 여러 태그 입력 가능 · 빈 값으로 저장하면 모든 태그 제거</div>
+    </div>
+    <div class="px-5 py-3 border-t border-white/[0.06] flex justify-end gap-2">
+      <button data-action="closeTagEdit"
+              class="rounded-full px-4 py-1.5 text-xs font-semibold text-white/50 border border-white/[0.07] hover:text-white/80 spring">취소</button>
+      <button id="tagEditSaveBtn" data-action="submitTagEdit"
+              class="rounded-full px-4 py-1.5 text-xs font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 hover:scale-[1.02] active:scale-[0.98] spring">
+        저장
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirmation modal (S1) — requires typing the name to enable the button -->
+<div id="deleteConfirmModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+     onclick="if(event.target===this)closeDeleteConfirm()" role="dialog" aria-modal="true" aria-labelledby="delConfirmTitle">
+  <div class="bg-[#0f0f0f] ring-1 ring-red-500/25 rounded-2xl w-[460px] max-w-[94vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
+    <div class="px-5 py-3 border-b border-red-500/20 bg-red-500/[0.06] flex items-center gap-2">
+      <iconify-icon icon="solar:danger-triangle-bold" width="18" class="text-red-400"></iconify-icon>
+      <span class="text-sm font-bold text-red-300" id="delConfirmTitle">위험: 복구 불가능한 삭제</span>
+    </div>
+    <div class="p-5 space-y-3">
+      <div class="text-sm text-white/85 leading-relaxed" id="delConfirmMessage">—</div>
+      <div>
+        <div class="text-[10px] text-white/40 uppercase tracking-widest font-bold mb-1.5">진행하려면 아래 이름을 정확히 입력하세요</div>
+        <div id="delConfirmTarget" class="text-[13px] font-mono text-amber-300/90 bg-black/30 px-3 py-2 rounded-lg ring-1 ring-white/[0.06] select-all break-all">—</div>
+      </div>
+      <input id="delConfirmInput" type="text" autocomplete="off" spellcheck="false"
+             placeholder="위 이름 그대로 입력…"
+             class="w-full bg-white/5 border border-white/[0.10] rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-red-400/40 font-mono">
+      <div id="delConfirmMismatch" class="text-[10px] text-red-400/70 hidden">입력값이 일치하지 않습니다.</div>
+    </div>
+    <div class="px-5 py-3 border-t border-white/[0.06] flex justify-end gap-2">
+      <button data-action="closeDeleteConfirm"
+              class="rounded-full px-4 py-1.5 text-xs font-semibold text-white/50 border border-white/[0.07] hover:text-white/80 spring">취소</button>
+      <button id="delConfirmBtn" disabled data-action="runPendingDelete"
+              class="rounded-full px-4 py-1.5 text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/40 hover:scale-[1.02] active:scale-[0.98] spring disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100">
+        영구 삭제
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Command palette (Cmd+K) -->
+<div id="commandPalette" class="hidden fixed inset-0 z-50 flex items-start justify-center bg-black/70 backdrop-blur-sm pt-[12vh]"
+     onclick="if(event.target===this)closeCommandPalette()" role="dialog" aria-label="명령 팔레트">
+  <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[640px] max-w-[92vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
+    <div class="flex items-center gap-2 px-4 py-3 border-b border-white/[0.06]">
+      <iconify-icon icon="solar:magnifer-linear" width="16" class="text-white/40"></iconify-icon>
+      <input id="cmdkInput" type="text" placeholder="뷰 이동, 프로젝트/세션 검색…"
+             class="flex-1 bg-transparent outline-none text-sm text-white/85 placeholder:text-white/25" />
+      <span class="text-[10px] text-white/25 font-mono">esc</span>
+    </div>
+    <div id="cmdkResults" class="max-h-[55vh] overflow-y-auto py-2"></div>
+    <div class="border-t border-white/[0.06] px-4 py-2 text-[10px] text-white/30 flex items-center gap-3">
+      <span><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08]">↑↓</kbd> 이동</span>
+      <span><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08]">↵</kbd> 선택</span>
+      <span><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08]">esc</kbd> 닫기</span>
+    </div>
+  </div>
+</div>
+
+<!-- Keyboard shortcuts help overlay -->
+<div id="kbdHelp" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="키보드 단축키"
+     onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[440px] max-w-[92vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
+      <span class="text-sm font-bold text-white/85">키보드 단축키</span>
+      <button onclick="document.getElementById('kbdHelp').classList.add('hidden')" class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
+    </div>
+    <div class="p-5 text-xs space-y-2">
+      <div class="flex items-center justify-between"><span class="text-white/50">뷰 이동</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">g</kbd> → <kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">f/o/s/c/m/p/e</kbd></span></div>
+      <div class="flex items-center justify-between"><span class="text-white/50">검색 포커스</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">/</kbd></span></div>
+      <div class="flex items-center justify-between"><span class="text-white/50">모달 닫기·검색 해제</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">Esc</kbd></span></div>
+      <div class="flex items-center justify-between"><span class="text-white/50">도움말</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">?</kbd></span></div>
+      <div class="pt-2 text-[10px] text-white/30 border-t border-white/[0.05] mt-2 pt-3">
+        f=검색 · o=개요 · b=비용 · s=세션 · c=대화 · m=모델 · p=프로젝트 · u=Subagent · t=타임라인 · e=관리
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════════════════ -->
+<!-- Filename-based cache busting: /static/app.v35.js, not ?v=30.
+     The server strips the .vNNN. segment before filesystem lookup. This is
+     robust against proxies/CDNs that drop query strings from cache keys.
+     Module load order matters: app.js defines state/utils/safeFetch first,
+     then feature modules (plan/overview/subagents/charts) consume those globals. -->
+<script src="/static/bundle.v79.js" defer></script>
+<script src="/static/subagents-codex.js" defer></script>
+</body>
+</html>

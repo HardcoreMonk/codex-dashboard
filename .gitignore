@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+
+# Virtual env (created by start.sh)
+.venv/
+venv/
+env/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local Claude Code project state
+.claude/
+
+# Environment / secrets
+.env
+*.local
+
+# Build artifacts
+static/bundle.js
+static/bundle.js.map
+static/tailwind.css
+static/.bundle-src.tmp.js
+node_modules/
+
+# OS junk
+Thumbs.db
+ehthumbs.db
+
+# Playwright MCP diagnostic artifacts (screenshots / console dumps / DOM yml)
+.playwright-mcp/
+test-results/
+*.png
+
+# Database (runtime generated)
+dashboard.db
+.gstack/
+.superpowers/
+docs/superpowers/plans/
