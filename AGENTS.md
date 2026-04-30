@@ -40,6 +40,13 @@ Codex Dashboard 프로젝트의 최상위 기준 문서.
 
 공통 정책은 이 문서에 두고, 나머지 문서는 각자 자기 책임 범위만 유지한다.
 
+## Agent Workflow Contract
+
+- Issue tracker 규칙은 `docs/agents/issue-tracker.md`를 따른다.
+- Triage label/status 매핑은 `docs/agents/triage-labels.md`를 따른다.
+- Domain language와 ADR 소비 규칙은 `docs/agents/domain.md`를 따른다.
+- Codex는 사용자가 명시하지 않은 issue 생성, close, label 변경, commit, push를 하지 않는다.
+
 ## 운영 원칙
 
 - 운영 기본값은 Codex 단일 인스턴스다.
