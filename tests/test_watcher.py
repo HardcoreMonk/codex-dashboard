@@ -3,8 +3,8 @@ import sqlite3
 import threading
 from pathlib import Path
 
-import database
 import codex_watcher as watcher
+import database
 
 # ─── WatcherMetrics dependency injection ─────────────────────────────────
 

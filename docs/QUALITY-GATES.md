@@ -14,7 +14,7 @@
 
 | 기준 | 조건 |
 |------|------|
-| 전체 통과 | 174+ tests, **0 failures** |
+| 전체 통과 | 318+ tests, **0 failures** |
 | 신규 기능 | 관련 테스트 최소 1개 추가 |
 | 버그 수정 | 재현 테스트 추가 후 수정 |
 | 인증 관련 | `test_auth.py` 패턴으로 양쪽 (인증O/인증X) 검증 |
@@ -45,17 +45,17 @@ ruff check .
 ## Gate 4: 보안 (필수)
 
 ```bash
-bandit -r main.py database.py parser.py watcher.py collector.py -s B101 -q
+bandit -r main.py database.py codex_parser.py codex_watcher.py codex_collector.py -s B101,B608 -q
 ```
 
 | 기준 | 조건 |
 |------|------|
-| bandit | 0 findings (B101 assert 제외) |
-| SQL | 모든 쿼리 파라미터화. f-string SQL은 화이트리스트 컬럼만 |
+| bandit | 0 findings (B101 assert, B608 SQLite whitelist false-positive 제외) |
+| SQL | 모든 쿼리 파라미터화. f-string SQL은 화이트리스트 컬럼/고정 placeholder 조합만 |
 | XSS | `innerHTML`에 사용자 데이터 → `esc()` 필수. 새 코드는 `h()` 또는 DOM API |
 | 인증 | destructive 엔드포인트는 인증 필수. `_AUTH_BYPASS`에 추가 금지 |
 
-## Gate 5: 의존성 (경고)
+## Gate 5: 의존성 (필수 로컬, CI 경고)
 
 ```bash
 pip-audit --strict
@@ -63,7 +63,7 @@ pip-audit --strict
 
 | 기준 | 조건 |
 |------|------|
-| pip-audit | 알려진 취약점 0 (CI에서 경고, 블록은 아님) |
+| pip-audit | 알려진 취약점 0 (CI에서는 경고, 로컬 게이트에서는 실패로 취급) |
 | CDN 스크립트 | SRI integrity 해시 필수 |
 
 ## Gate 6: DB 마이그레이션 (해당 시)
@@ -81,7 +81,7 @@ pip-audit --strict
 |------|------|
 | 캐시 bump | `index.html`의 `.vN` 일괄 증가 |
 | 빌드 반영 | `npm run build` 후 `bundle.js` 갱신 |
-| `data-action` | 새 버튼은 inline onclick 대신 `data-action` 사용 |
+| `data-action` | 정적/동적 HTML 모두 inline DOM handler 속성 금지, 명령은 `data-action` 또는 DOM listener 사용 |
 | 접근자 | `state.*` 직접 변경 대신 `setChart`/`setPage` 등 사용 |
 | 라이트 테마 | 새 색상은 `app.css` 라이트 매핑에 포함 확인 |
 | 접근성 | 클릭 가능 요소: `tabindex="0"` + `role="button"` + keydown |
@@ -96,6 +96,19 @@ pip-audit --strict
 | 날짜 파라미터 | `YYYY-MM-DD` 형식 검증 |
 | destructive | `openDeleteConfirm()` 패턴 필수 |
 
+## Gate 9: Governance / Wiki (해당 시)
+
+`/api/governance/*` 또는 `codex-project-mgmt` 연동을 수정한 경우 추가 확인한다.
+
+| 기준 | 조건 |
+|------|------|
+| 인증 | `_AUTH_BYPASS`에 governance API를 추가하지 않음 |
+| script allowlist | 실행 대상은 `project-sync.sh`, `wiki-check.sh`, `zone-track.sh`로 고정 |
+| path safety | wiki page와 project path에서 `..`, 절대 경로, 비-`.md` 파일 차단 |
+| registry mutation | `projects.yaml` append는 중복 `id/path` 차단, temp file replace 사용 |
+| 감사 로그 | mutation은 `governance_check`, `governance_sync`, `governance_track`, `governance_project_add`로 기록 |
+| 테스트 | `pytest tests/test_api.py -q -k governance` 통과 |
+
 ---
 
 ## CI 자동 검증
@@ -108,17 +121,24 @@ jobs:
   js-build: # Gate 2
 ```
 
-Gate 6~8은 리뷰어가 수동 확인.
+Gate 6~9는 리뷰어가 수동 확인한다. Gate 9는 governance 연동 변경 시 적용한다.
 
 ## 빠른 체크 (로컬)
 
 ```bash
-# 한 줄로 Gate 1~3 확인
-./.venv/bin/python -m pytest tests/ --tb=short && npm run build && ruff check .
+# 한 줄로 Gate 1~5 확인
+./.venv/bin/python -m pip install --upgrade pip && ./.venv/bin/python -m pytest tests/ --tb=short && npm run build && ./.venv/bin/ruff check . && ./.venv/bin/bandit -r main.py database.py codex_parser.py codex_watcher.py codex_collector.py -s B101,B608 -q && ./.venv/bin/pip-audit --strict
 ```
 
 문서/운영 설정을 수정한 경우 추가 확인:
 
 ```bash
 rg -n "8617|codex-web-dashboard|~/.codex/dashboard.db" README.md AGENTS.md CLAUDE.md docs
+```
+
+Governance 연동을 수정한 경우:
+
+```bash
+./.venv/bin/python -m pytest tests/test_api.py -q -k governance
+rg -n "governance|/api/governance|project-sync|wiki-check|zone-track" README.md docs main.py static/index.html static/app.js
 ```

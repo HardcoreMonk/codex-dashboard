@@ -26,6 +26,7 @@ import shutil
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -127,6 +128,9 @@ def send_batch(url: str, node_id: str, ingest_key: str,
                file_path: str, records: list[dict],
                timeout: int = 30) -> dict:
     """POST a batch of records to the dashboard."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        raise ValueError('dashboard url must be absolute http(s)')
     payload = json.dumps({
         'node_id': node_id,
         'file_path': file_path,
@@ -143,7 +147,8 @@ def send_batch(url: str, node_id: str, ingest_key: str,
         method='POST',
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # URL scheme was validated above before constructing the Request.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors='replace')[:500]

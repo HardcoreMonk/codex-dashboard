@@ -23,14 +23,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest httpx ruff bandit pip-audit
+          python -m pip install -r requirements.txt
 
       - name: Ruff (lint)
         run: ruff check .
 
       - name: Bandit (security scan)
-        run: bandit -r main.py database.py parser.py watcher.py collector.py -s B101 -q
+        run: bandit -r main.py database.py codex_parser.py codex_watcher.py codex_collector.py -s B101,B608 -q
 
       - name: pip-audit (dependency vulnerabilities)
         run: pip-audit --strict

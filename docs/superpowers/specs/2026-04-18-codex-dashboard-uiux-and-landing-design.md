@@ -1,5 +1,7 @@
 # Codex Dashboard UI/UX Optimization and Landing Variants Design
 
+> Current note (2026-04-30): This is a historical design record. Current product, runtime, and verification baselines are defined by `AGENTS.md`, `README.md`, and `docs/QUALITY-GATES.md`.
+
 ## Goal
 
 Codex Dashboard를 `운영 / 생산성 / 보고` 세 축을 균형 있게 담는 제품으로 재정의한다.  

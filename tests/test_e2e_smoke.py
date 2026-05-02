@@ -24,7 +24,6 @@ from pathlib import Path
 
 import pytest
 
-
 COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
 REMOVED_CLAUDE_API_PATHS = (
     '/api/claude-ai/stats',
@@ -307,7 +306,8 @@ def test_codex_dashboard_identity_is_shared_across_shell_and_landing_pages(e2e_c
 def test_overview_keeps_balanced_portal_copy(e2e_client):
     html = e2e_client.get('/app').text
 
-    assert '운영 / 생산성 / 보고' in html
+    assert '운영, 생산성, 보고 흐름을 한 화면에서 연결합니다.' in html
+    assert 'overview-axis-summary' in html
     assert 'Operations summary' not in html
     assert 'Productivity summary' not in html
     assert 'Reporting summary' not in html
@@ -447,6 +447,72 @@ def test_overview_is_default_shell_view(e2e_client):
     assert 'id="overviewReportingPreview"' in html
 
 
+def test_primary_navigation_uses_descriptive_group_labels(e2e_client):
+    html = e2e_client.get('/app').text
+    app_js = Path('static/app.js').read_text()
+
+    for label in ('전체 현황', '작업 탐색', '사용 분석', '운영 관리'):
+        assert label in html
+    for label in ('오늘·누적', '검색·세션·대화', '비용·모델·타임라인', '백업·Wiki·노드'):
+        assert label in html
+    for label in ('메시지 검색', '비용 분석', '세션 목록', '대화 뷰어', '타임라인 분석'):
+        assert label in app_js
+
+
+def test_overview_uses_compact_visual_summary_components():
+    overview_js = Path('static/overview.js').read_text()
+    css = Path('static/app.css').read_text()
+
+    for marker in (
+        'overview-signal-card',
+        'overview-bar-row',
+        'overview-dial',
+        'overview-role-stack',
+        'overviewProjectMetric',
+    ):
+        assert marker in overview_js + css
+
+
+def test_overview_axis_keywords_are_integrated_into_flow_header(e2e_client):
+    html = e2e_client.get('/app').text
+    css = Path('static/app.css').read_text()
+
+    assert 'overview-axis-summary' in html
+    assert 'overview-axis-step--ops' in html
+    assert 'overview-axis-step--productivity' in html
+    assert 'overview-axis-step--reporting' in html
+    assert '운영 / 생산성 / 보고' not in html
+    assert 'overview-balance-line' not in html
+    assert '.overview-axis-summary' in css
+    assert '.overview-axis-summary__steps' in css
+
+
+def test_overview_last_conversation_preview_label_stays_on_one_line(e2e_client):
+    html = e2e_client.get('/app').text
+    overview_js = Path('static/overview.js').read_text()
+    css = Path('static/app.css').read_text()
+
+    label_markup = '<span class="overview-nowrap overview-entry-shell__hint">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</span>'
+    assert label_markup in html
+    assert label_markup in overview_js
+    assert '.overview-nowrap' in css
+    assert '.overview-entry-shell__hint' in css
+    assert 'white-space: nowrap' in css
+
+
+def test_dashboard_total_status_is_configured_for_single_line(e2e_client):
+    html = e2e_client.get('/app').text
+    overview_js = Path('static/overview.js').read_text()
+    css = Path('static/app.css').read_text()
+
+    assert 'id="hdrTotal" class="dashboard-status-value dashboard-status-value--total"' in html
+    assert '전체: ${fmt$(' in overview_js
+    assert 'fitDashboardTotalStatus' in overview_js
+    assert 'setDashboardTotal' in overview_js
+    assert '.dashboard-status-value--total' in css
+    assert 'white-space: nowrap' in css
+
+
 def test_overview_shell_contains_ops_console_regions(e2e_client):
     html = e2e_client.get('/app').text
 
@@ -463,6 +529,30 @@ def test_overview_shell_contains_ops_console_regions(e2e_client):
     for region_id, title_id in region_pairs:
         assert f'id="{region_id}"' in html
         assert f'aria-labelledby="{title_id}"' in html
+
+
+def test_overview_top_projects_survives_console_rerenders():
+    overview_js = Path('static/overview.js').read_text()
+
+    assert re.search(
+        r'const\s+overviewState\s*=\s*\{.*?projects:\s*null,.*?\};',
+        overview_js,
+        re.S,
+    )
+    assert re.search(
+        r'function\s+renderOverviewOpsPreview\(\)\s*\{.*?'
+        r'if\s*\(\s*Array\.isArray\(overviewState\.projects\)\s*\)\s*\{\s*'
+        r'renderTopProjects\(overviewState\.projects\);',
+        overview_js,
+        re.S,
+    )
+    assert re.search(
+        r'function\s+loadTopProjects\(\)\s*\{.*?'
+        r'overviewState\.projects\s*=\s*projects;\s*'
+        r'renderOverviewOpsPreview\(\);',
+        overview_js,
+        re.S,
+    )
 
 
 def test_grouped_navigation_routing_is_backed_by_app_js():
@@ -615,6 +705,35 @@ def test_secondary_frontend_modules_reference_codex_summary_endpoints():
     assert '/api/codex/sessions' in sessions_js
     assert 'codexSessionsPanel' in sessions_js
     assert '/api/sessions/' in sessions_js and '/replay' in sessions_js
+
+
+def test_frontend_event_and_fetch_contracts_are_hardened():
+    html = Path('static/index.html').read_text()
+    app_js = Path('static/app.js').read_text()
+    sessions_js = Path('static/sessions.js').read_text()
+    plan_js = Path('static/plan.js').read_text()
+
+    for source in (html, app_js, sessions_js, plan_js):
+        assert 'onclick=' not in source
+        assert '.onclick' not in source
+        assert 'onkeydown=' not in source
+    assert 'data-backdrop-action=' in html
+    assert 'async function safeFetch(url, options = {})' in app_js
+    assert "const method = String(options.method || 'GET').toUpperCase();" in app_js
+    assert 'fetch(url, { ...options, signal: ctrl.signal })' in app_js
+    assert "await safeFetch('/api/auth/logout', { method: 'POST' });" in app_js
+    assert "const d = await safeFetch('/api/auth/me');" in app_js
+
+    for js in (app_js, sessions_js, plan_js):
+        assert 'fetch(' not in js.replace('fetch(url, { ...options, signal: ctrl.signal })', '')
+
+    for snippet in [
+        "safeFetch('/api/admin/retention/schedule', {",
+        "safeFetch(`/api/sessions/${encodeURIComponent(sid)}?confirm=true`, { method: 'DELETE' })",
+        "safeFetch(`/api/sessions/${encodeURIComponent(sid)}/tags`, {",
+        "safeFetch('/api/plan/config', {",
+    ]:
+        assert snippet in app_js + sessions_js + plan_js
 
 
 def test_timeline_and_subagent_modules_keep_codex_paths_self_consistent():

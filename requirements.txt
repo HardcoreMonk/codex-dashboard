@@ -12,3 +12,6 @@ prometheus_client>=0.20.0     # /metrics endpoint
 watchdog>=4.0.0               # inotify-based file watching (polling fallback if missing)
 pytest==9.0.3                 # test runner used by AGENTS.md verification
 httpx==0.28.1                 # Starlette/FastAPI TestClient transport dependency
+ruff==0.15.11                 # lint runner used by documented quality gates
+bandit==1.9.4                 # security scanner used by CI and QUALITY-GATES.md
+pip-audit==2.10.0             # dependency vulnerability scanner used by CI

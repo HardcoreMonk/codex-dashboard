@@ -2,14 +2,15 @@
 
 프로젝트 운영 기준과 문서 우선순위는 `AGENTS.md`를 따른다.
 
-SQLite 기본 파일: `~/.codex/dashboard.db`  
-모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=15`
+SQLite 기본 파일: `~/.codex/dashboard.db`
+모드: WAL, `PRAGMA busy_timeout=5000`, `PRAGMA auto_vacuum=INCREMENTAL`, `PRAGMA user_version=18`
 
 ## 저장 원칙
 
 - 제품 기본 저장소는 Codex 전용이다.
 - 세션/프로젝트/메시지 기본 경로는 `codex_projects`, `codex_sessions`, `codex_messages`, `codex_messages_fts`다.
 - 운영 보조 테이블은 `file_watch_state`, `plan_config`, `remote_nodes`, `admin_audit`, `app_config`다.
+- 현재 Codex-native 저장소는 토큰/비용 컬럼을 별도로 저장하지 않는다. 관련 API는 호환 shape를 유지하며 신뢰 가능한 usage 메타데이터가 없을 때 0 값으로 응답한다.
 
 ## file_watch_state
 
@@ -57,7 +58,7 @@ SQLite 기본 파일: `~/.codex/dashboard.db`
 |---|---|---|
 | `id` | INTEGER PK | autoincrement |
 | `ts` | TEXT | ISO 8601 with ms |
-| `action` | TEXT | `backup`, `retention`, `retention_scheduled`, `node_*` 등 |
+| `action` | TEXT | `backup`, `retention`, `retention_scheduled`, `node_*`, `governance_*` 등 |
 | `actor_ip` | TEXT | 요청자 IP 또는 `local` |
 | `status` | TEXT | `ok` / `error` |
 | `detail` | TEXT | JSON detail payload |
@@ -67,6 +68,13 @@ SQLite 기본 파일: `~/.codex/dashboard.db`
 ```sql
 CREATE INDEX IF NOT EXISTS idx_admin_audit_ts ON admin_audit(ts DESC);
 ```
+
+대표 governance action:
+
+- `governance_check` — `wiki-check.sh` 실행
+- `governance_sync` — `project-sync.sh` 실행
+- `governance_track` — `zone-track.sh` 실행
+- `governance_project_add` — `projects.yaml` 신규 항목 append
 
 ## app_config
 
@@ -182,8 +190,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS codex_messages_fts USING fts5(
 | v3 | FTS5 도입 |
 | v4-v14 | 레거시 런타임 보강 단계 |
 | v15 | `codex_projects`, `codex_sessions`, `codex_messages`, `codex_messages_fts` 도입 |
+| v16 | retired legacy export 스키마 제거 |
+| v17 | `codex_sessions.source_node` + 인덱스 |
+| v18 | `codex_sessions.final_stop_reason`, `codex_sessions.tags` |
 
-현재 제품 기준에서는 v15 Codex 저장소가 기본 경로다. 레거시 단계 설명은 아키텍처 결정 기록과 이력 문서에서만 다룬다.
+현재 제품 기준에서는 v18 Codex 저장소가 기본 경로다. 레거시 단계 설명은 아키텍처 결정 기록과 이력 문서에서만 다룬다.
 
 ## DB 재구축
 

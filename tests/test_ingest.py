@@ -5,11 +5,9 @@ Covers: POST /api/nodes, GET /api/nodes, DELETE /api/nodes/{id},
         POST /api/nodes/{id}/rotate-key, POST /api/ingest,
         Codex collector download, removed legacy download, auth requirements.
 """
-import json
 import sys
 
 import pytest
-
 
 TEST_PASSWORD = 'ingest-test-pw'
 CODEX_COLLECTOR_DOWNLOAD_PATH = '/api/codex-collector.py'

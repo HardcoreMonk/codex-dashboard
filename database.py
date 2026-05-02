@@ -73,8 +73,8 @@ def read_db():
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except sqlite3.Error:
+                logger.debug("stale read connection close failed", exc_info=True)
         conn = _new_connection()
         _read_local.conn = conn
         _read_local.conn_time = time.time()
@@ -84,8 +84,8 @@ def read_db():
     except sqlite3.Error:
         try:
             conn.close()
-        except Exception:
-            pass
+        except sqlite3.Error:
+            logger.debug("failed read connection close failed", exc_info=True)
         _read_local.conn = None
         _read_local.conn_epoch = -1
         raise
@@ -1301,8 +1301,8 @@ def close_thread_connections() -> None:
     if conn is not None:
         try:
             conn.close()
-        except Exception:
-            pass
+        except sqlite3.Error:
+            logger.debug("thread read connection close failed", exc_info=True)
         _read_local.conn = None
 
 

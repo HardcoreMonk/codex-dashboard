@@ -14,7 +14,7 @@
 |------|------|
 | `main.py` | FastAPI 라우트 + WS + 쿠키 세션 인증 + /api/ingest + 보존 스케줄러 |
 | `database.py` | SQLite WAL, write/read 분리, v0→v18 마이그레이션 |
-| `codex_parser.py` | JSONL 파싱 (assistant/user/system), 비용 계산, source_node |
+| `codex_parser.py` | Codex JSONL 정규화, legacy-compatible parser helper, source_node |
 | `codex_watcher.py` | watchdog + safety poll, WatcherMetrics DI |
 | `codex_collector.py` | 원격 수집 에이전트 (stdlib only) |
 | `build.js` | esbuild concat+minify + tailwindcss CLI |
@@ -58,8 +58,8 @@ PORT=8617                     # 기본 Codex 포트
 - 읽기: `read_db()` — thread-local 캐시 (TTL 300s), WAL 다중 리더
 - 백업: `_write_lock` 획득 후 `sqlite3.backup()`
 
-### 비용은 INTEGER micro-dollars
-`cost_micro` (1 USD = 1,000,000). SQL 읽기 시 `cost_micro * 1.0 / 1000000 AS cost_usd`. **float 누적 금지.**
+### 비용 호환 필드는 INTEGER micro-dollars
+legacy-compatible parser/helper가 `cost_micro`를 다룰 때는 1 USD = 1,000,000 micro-dollars로 저장한다. SQL 읽기 시 `cost_micro * 1.0 / 1000000 AS cost_usd`. **float 누적 금지.** 현재 Codex-native `codex_*` 저장소는 토큰/비용 컬럼을 별도로 저장하지 않으며, usage/cost API shape는 신뢰 가능한 usage 메타데이터가 없을 때 0 값으로 유지한다.
 
 ### 프로젝트 식별 — cwd 최초 고정
 - `record.cwd` → `PureWindowsPath(cwd).name` (크로스 플랫폼)
@@ -88,9 +88,10 @@ PORT=8617                     # 기본 Codex 포트
 DB는 **UTC**. 시계열 쿼리는 `plan_config.timezone_name` (IANA)으로 변환.
 
 ### 관리자 액션 감사
-- `/api/admin/backup`, `/retention`, `/retention/schedule`, `/api/nodes/*` 를 변경하거나 추가할 때 **반드시** `_audit(action, request, detail=...)` 호출 (status='ok'/'error')
+- `/api/admin/backup`, `/retention`, `/retention/schedule`, `/api/nodes/*`, `/api/governance/*` mutation을 변경하거나 추가할 때 **반드시** `_audit(action, request, detail=...)` 호출 (status='ok'/'error')
 - `_audit()`는 실패해도 raise 하지 않음 — admin 액션 자체를 막으면 안 됨
 - 스케줄러 자동 실행은 `request=None` 전달 → `actor_ip='local'`
+- governance script 실행은 allowlist된 `project-sync.sh`, `wiki-check.sh`, `zone-track.sh`만 허용한다.
 
 ### 보존 스케줄러
 - `_retention_scheduler_loop()`는 lifespan 진입 시 `asyncio.create_task()`로 시작, 종료 시 cancel
@@ -115,7 +116,7 @@ DB는 **UTC**. 시계열 쿼리는 `plan_config.timezone_name` (IANA)으로 변�
 | v12 | sessions.turn_duration_ms |
 | v14 | admin_audit + app_config — 관리자 감사 로그 + in-app 설정 스토어 |
 | v15 | Codex 전용 프로젝트/세션/메시지 저장소 + 전용 FTS |
-| v16 | retired `claude_ai_*` 스키마 제거 |
+| v16 | retired legacy export 스키마 제거 |
 | v17 | `codex_sessions.source_node` + 인덱스 |
 | v18 | `codex_sessions.final_stop_reason`, `codex_sessions.tags` |
 
@@ -124,7 +125,7 @@ DB는 **UTC**. 시계열 쿼리는 `plan_config.timezone_name` (IANA)으로 변�
 ## 보안 체크리스트
 
 - **SQL**: 전 파라미터화. `ORDER BY` 화이트리스트. LIKE에 ESCAPE.
-- **XSS**: `h()` 헬퍼 또는 DOM API. `innerHTML` + 템플릿 리터럴 금지. `esc()`로 `&<>"'` escape.
+- **XSS**: `h()` 헬퍼 또는 DOM API 우선. `innerHTML` 사용 시 사용자 데이터는 반드시 `esc()`로 `&<>"'` escape.
 - **인증**: 쿠키 세션 (`dash_session`, HMAC 서명, 만료 내장). rate limit 5회/분/IP.
 - **CSRF**: `SameSite=Lax`. CORS 변경 시 CSRF 토큰 필수.
 - **삭제**: `openDeleteConfirm()` — 이름 정확 입력 필수.
@@ -137,12 +138,12 @@ npm run dev      # watch 모드
 ```
 - `index.html`은 `bundle.vN.js` + `tailwind.vN.css` 2개만 로드
 - 서버가 `.vN` strip하여 실제 파일 서빙
-- 빌드 산출물은 git tracked — 배포 시 Node 불필요
+- 빌드 산출물은 git ignore — 배포 시 `npm run build` 실행 또는 별도 산출물 포함 필수
 
 ## 프런트 수정 규칙
 
 - **캐시버스팅**: `index.html`의 `.vN` 일괄 bump
-- **이벤트**: `data-action="fnName"` + 중앙 위임. 새 버튼은 inline onclick 대신 `data-action` 사용
+- **이벤트**: `data-action="fnName"` + 중앙 위임. 정적/동적 HTML 모두 inline DOM handler 속성(`onclick`, `onkeydown` 등) 금지
 - **상태 접근자**: `getChart`/`setChart`/`destroyChart`, `setPage`/`setAdvFilters` 등. `state.*` 직접 변경 지양
 - **이벤트 버스**: `bus.emit('refresh')` / `bus.on('refresh', fn)` — 모듈 간 직접 함수 호출 대신 사용
 - **WS 이벤트**: `debouncedRefresh`로 batch

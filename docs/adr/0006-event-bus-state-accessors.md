@@ -28,17 +28,17 @@ setPage(1); setAdvFilters({});   // state 직접 변경 대신
 
 ### 3. `data-action` 이벤트 위임
 ```html
-<button data-action="toggleTheme">  <!-- onclick="toggleTheme()" 대신 -->
+<button data-action="toggleTheme">  <!-- inline DOM handler 대신 -->
 ```
 
 ## 근거
 
 - 모듈 간 결합도 감소 — 새 모듈은 `bus.on` 등록만으로 통합
 - Chart.js 인스턴스 destroy 누락 방지 — `setChart`가 자동 처리
-- inline onclick 51개 중 43개 전환 → CSP 준수 기반 마련
+- 정적/동적 HTML의 inline DOM handler 속성 제거 → CSP 준수 기반 마련
 
 ## 트레이드오프
 
 - 런타임 오버헤드 (CustomEvent 디스패치) — 무시 가능 수준
-- 기존 코드와 혼재 (글로벌 직접 참조 일부 잔존)
+- 기존 글로벌 함수 계약은 유지하되 이벤트 진입점은 위임 핸들러로 통일
 - 완전한 모듈 전환은 Phase 4 (ES module import/export)에서

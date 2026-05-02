@@ -104,10 +104,10 @@ footer a{color:var(--accent);text-decoration:none}
   <h1><span>Codex</span> Dashboard</h1>
   <p>Codex Dashboard — Feature Reference</p>
   <div class="meta">
-    <div class="meta-item"><strong>58</strong> API Routes</div>
-    <div class="meta-item"><strong>174</strong> Tests</div>
+    <div class="meta-item"><strong>88</strong> App HTTP Routes</div>
+    <div class="meta-item"><strong>318</strong> Tests</div>
     <div class="meta-item"><strong>14</strong> Feature Categories</div>
-    <div class="meta-item"><strong>v13</strong> Schema</div>
+    <div class="meta-item"><strong>v18</strong> Schema</div>
   </div>
 </header>
 
@@ -162,7 +162,7 @@ footer a{color:var(--accent);text-decoration:none}
 <!-- ═══ 02 ═══ -->
 <section id="cost">
   <h2><span class="badge">02</span> Cost Analysis</h2>
-  <p>11 cost-related metrics and visualizations. All costs stored as INTEGER micro-dollars (zero float drift).</p>
+  <p>11 cost-related metrics and visualizations. Legacy-compatible cost helpers use INTEGER micro-dollars; Codex-native usage fields remain zero when logs lack trusted usage metadata.</p>
   <div class="grid">
     <div class="card"><h3>Live Cost Header</h3><p>Today + all-time cost displayed in nav bar, updated on every WS batch.</p></div>
     <div class="card"><h3>Period Comparison</h3><p>Day/week/month usage with delta vs previous period (% change).</p></div>
@@ -283,7 +283,7 @@ footer a{color:var(--accent);text-decoration:none}
   <div class="arch">[Remote Server]                         [Dashboard Server]
 codex_collector.py                      POST /api/ingest
   ~/.codex/{sessions,projects,logs}      X-Ingest-Key auth
-  watchdog + 5s poll                      parser.process_record(source_node)
+  watchdog + 5s poll                      codex_parser.process_record(source_node)
   state file tracking                     DB write + WS broadcast
   INGEST_KEY env var                      codex_sessions.source_node = node_id</div>
   <table>
@@ -320,8 +320,8 @@ codex_collector.py                      POST /api/ingest
     <tr><td>Rate Limit</td><td>5 attempts/min/IP on login</td></tr>
     <tr><td>Basic Auth Compat</td><td>Header-based auth for curl/collector</td></tr>
     <tr><td>CORS Restriction</td><td>Environment-based allowed origins</td></tr>
-    <tr><td>SQL Injection</td><td>100% parameterized. ORDER BY whitelist. LIKE ESCAPE</td></tr>
-    <tr><td>XSS Prevention</td><td>h() helper, esc() encoding, innerHTML forbidden</td></tr>
+    <tr><td>SQL Injection</td><td>Parameterized values, ORDER BY whitelist, fixed placeholder lists, LIKE ESCAPE</td></tr>
+    <tr><td>XSS Prevention</td><td>DOM API/h() first; esc() required when user data reaches innerHTML</td></tr>
     <tr><td>Delete Confirmation</td><td>Type-exact-name modal for all destructive actions</td></tr>
     <tr><td>CDN Integrity</td><td>SRI hashes on all external scripts</td></tr>
   </table>
@@ -362,30 +362,30 @@ codex_collector.py                      POST /api/ingest
 <section id="infra">
   <h2><span class="badge">14</span> Developer Infrastructure</h2>
   <div class="stat-row">
-    <div class="stat"><div class="val">58</div><div class="label">API Routes</div></div>
-    <div class="stat"><div class="val">174</div><div class="label">Tests</div></div>
-    <div class="stat"><div class="val">186KB</div><div class="label">Bundle</div></div>
-    <div class="stat"><div class="val">28KB</div><div class="label">CSS</div></div>
-    <div class="stat"><div class="val">65ms</div><div class="label">Build Time</div></div>
+    <div class="stat"><div class="val">88</div><div class="label">App Routes</div></div>
+    <div class="stat"><div class="val">318</div><div class="label">Tests</div></div>
+    <div class="stat"><div class="val">268.7KB</div><div class="label">Bundle</div></div>
+    <div class="stat"><div class="val">91.7KB</div><div class="label">CSS</div></div>
+    <div class="stat"><div class="val">&lt;1s</div><div class="label">Build Time</div></div>
     <div class="stat"><div class="val">6</div><div class="label">ADRs</div></div>
   </div>
   <table>
     <tr><td>esbuild Bundle</td><td>7 JS files concat + minify into one bundle.js with sourcemap</td></tr>
-    <tr><td>Tailwind Production</td><td>CLI build: only used utilities (28KB vs 80KB CDN)</td></tr>
+    <tr><td>Tailwind Production</td><td>CLI build: local tailwind.css artifact, git ignored</td></tr>
     <tr><td>Watch Mode</td><td>npm run dev: auto-rebuild on file change</td></tr>
     <tr><td>CI/CD</td><td>GitHub Actions: ruff + bandit + pip-audit + pytest + esbuild</td></tr>
-    <tr><td>174 Tests</td><td>parser, DB, API, contract, e2e, auth, ingest, collector, WebSocket</td></tr>
+    <tr><td>318 Tests</td><td>parser, codex parser, DB, API, contract, e2e, auth, ingest, collector, WebSocket, backup/restore</td></tr>
     <tr><td>6 ADRs</td><td>SQLite, micro-dollars, cookie auth, esbuild, collector, event bus</td></tr>
-    <tr><td>8 Quality Gates</td><td>Tests, build, lint, security, deps, migration, frontend, API</td></tr>
+    <tr><td>9 Quality Gates</td><td>Tests, build, lint, security, deps, migration, frontend, API, governance/wiki</td></tr>
     <tr><td>SRI Hashes</td><td>Subresource integrity on all CDN scripts</td></tr>
     <tr><td>Event Bus</td><td>CustomEvent pub/sub: bus.emit/on for decoupled modules</td></tr>
     <tr><td>State Accessors</td><td>getChart/setChart/destroyChart, setPage/setAdvFilters</td></tr>
-    <tr><td>data-action Delegation</td><td>59 data-action handlers via delegated event (11 legacy onclick remaining)</td></tr>
+    <tr><td>data-action Delegation</td><td>Delegated click/keyboard activation; no inline DOM handler attributes in the app shell modules</td></tr>
   </table>
 </section>
 
 <footer>
-  Codex Dashboard Feature Reference &mdash; Generated 2026-04-14 &mdash; <a href="/">Open Dashboard</a>
+  Codex Dashboard Feature Reference &mdash; Updated 2026-04-30 &mdash; <a href="/">Open Dashboard</a>
 </footer>
 
 </div>

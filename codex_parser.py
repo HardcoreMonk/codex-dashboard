@@ -204,8 +204,8 @@ def get_agent_meta(file_path: str) -> tuple[str, str]:
             with open(meta_path, 'r') as handle:
                 meta = json.load(handle)
                 return meta.get('agentType', ''), meta.get('description', '')
-        except Exception:
-            pass
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+            logger.debug("failed to read agent metadata: %s", meta_path, exc_info=True)
     stem = Path(file_path).stem
     if stem.startswith('agent-acompact-'):
         return 'compact', 'Context compaction'

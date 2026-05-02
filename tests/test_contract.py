@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-
 COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
 REMOVED_CLAUDE_API_PATHS = (
     '/api/claude-ai/stats',
@@ -148,6 +147,9 @@ def test_contract_codex_service_unit_exists_with_codex_identity():
     assert 'Description=Codex Web Dashboard' in contents
     assert 'Environment=PORT=8617' in contents or '--port 8617' in contents
     assert 'SyslogIdentifier=codex-web-dashboard' in contents
+    assert 'EnvironmentFile=-/home/hardcoremonk/projects/codex-zone/codex-dashboard/.env' in contents
+    assert 'Environment=PYTHONDONTWRITEBYTECODE=1' in contents
+    assert '__pycache__' not in contents
 
 
 def test_contract_docs_describe_codex_single_service_in_korean():

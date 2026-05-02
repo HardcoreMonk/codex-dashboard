@@ -13,8 +13,8 @@ Codex CLI 세션을 수집·검색·복기하는 자체 호스팅 웹 대시보�
 | 스택 | 상세 |
 |------|------|
 | 백엔드 | Python 3.12, FastAPI, uvicorn, watchdog |
-| 저장소 | SQLite WAL + FTS5, micro-dollar 정수 비용, v15 스키마 |
-| 프런트 | esbuild 번들 (259KB) + Tailwind v3 빌드 (80KB) + Pretendard + Geist + Instrument Serif + Chart.js |
+| 저장소 | SQLite WAL + FTS5, Codex 전용 v18 스키마 |
+| 프런트 | esbuild 번들 (~268.7KB 로컬 빌드) + Tailwind v3 빌드 (~91.7KB) + Pretendard + Geist + Instrument Serif + Chart.js |
 | 테스트 | pytest + esbuild 빌드 검증, CI: ruff + bandit + pip-audit + esbuild |
 
 ## 빠른 시작
@@ -68,6 +68,7 @@ sudo systemctl enable --now codex-web-dashboard
 ```
 
 - `codex-web-dashboard.service` → `PORT=8617`, `DASHBOARD_DB_PATH=~/.codex/dashboard.db`, `DASHBOARD_BACKUP_DIR=~/.codex/dashboard-backups`
+- `codex-web-dashboard.service` 는 저장소 루트의 `.env` 를 선택적으로 읽고, `PYTHONDONTWRITEBYTECODE=1` 로 바이트코드 쓰기를 끈다.
 
 ### 테스트 & 빌드
 
@@ -99,6 +100,7 @@ npm run dev                                   # watch 모드 (개발)
 - 전체/오늘 비용 실시간 표시, 일/주/월 기간 비교
 - 시간별/일별/모델별 차트, 캐시 효율, 종료 사유 분포
 - $/hr 효율성, 월말 예측 (주중/주말 가중), 예산 소진 시각
+- Codex-native 로그에 신뢰 가능한 usage 메타데이터가 없으면 비용·토큰 호환 필드는 0으로 표시된다.
 
 ### 세션 관리
 - 8컬럼 정렬, 고급 필터 (날짜/비용/모델/태그/노드), FTS5 전문 검색
@@ -132,7 +134,8 @@ INGEST_KEY=<key> python3 codex_collector.py --url http://dashboard:8617 --node-i
 ### 관리자 (Admin)
 - **대시보드 상태**: 가동시간, 스키마 버전, DB/WAL 크기, 세션·메시지·subagent·원격노드 카운트, Codex ingest 상태 (`source_kind=codex`, `indexed_sessions`, `indexed_messages`), Watcher 상태·큐
 - **보존 스케줄**: 내장 asyncio 스케줄러 (enable/interval/days), 마지막·다음 실행 시각 표시
-- **감사 로그**: 모든 관리자 액션(backup/retention/node_*)을 IP·상태·상세 JSON과 함께 기록·필터 조회
+- **Governance / Wiki**: `codex-zone/projects.yaml` 신규 project 등록, production wiki index와 최신 audit 리포트 미리보기, `project-sync.sh`/`wiki-check.sh`/`zone-track.sh` 실행
+- **감사 로그**: 모든 관리자 액션(backup/retention/node_/governance_*)을 IP·상태·상세 JSON과 함께 기록·필터 조회
 - **백업·복원·보존**: `sqlite3.backup()` 기반 일관 백업 (10개 로테이션), 보존 preview → confirm
 
 ### 그 외
@@ -148,8 +151,8 @@ INGEST_KEY=<key> python3 codex_collector.py --url http://dashboard:8617 --node-i
 | 로그인 | 쿠키 세션 (`dash_session`, HMAC 서명, 7일 만료) |
 | rate limit | 로그인 5회/분/IP |
 | API 클라이언트 | Basic Auth 헤더 호환 |
-| SQL | 100% 파라미터화, ORDER BY 화이트리스트 |
-| XSS | `h()` 헬퍼 + `esc()`, innerHTML 금지 |
+| SQL | 값 파라미터화, `ORDER BY` 화이트리스트, 고정 placeholder 조합 |
+| XSS | `h()`/DOM API 우선, `innerHTML` 사용 시 사용자 데이터 `esc()` 필수 |
 | 삭제 | 이름 정확 입력 확인 모달 |
 | CDN | SRI integrity 해시 |
 | CORS | 환경변수 기반 허용 오리진 |
@@ -180,7 +183,7 @@ dashboard.example.com {
 ```
 main.py              FastAPI + WS + 쿠키 세션 인증 + in-app 스케줄러
 database.py          SQLite WAL, v0→v18 마이그레이션, write/read 분리
-codex_parser.py      JSONL 파싱, 비용 계산, cross-platform cwd
+codex_parser.py      Codex JSONL 정규화, legacy-compatible 비용 helper, cross-platform cwd
 codex_watcher.py     watchdog + safety poll
 codex_collector.py   원격 수집 에이전트 (stdlib only)
 build.js             esbuild + tailwindcss CLI 빌드
@@ -196,14 +199,16 @@ static/
   plan.js            예산 설정
   subagents.js       7개 섹션 시각화
   app.css            스타일 + 라이트모드 (WCAG AA)
-  bundle.js          빌드 산출물 (esbuild)
-  tailwind.css       빌드 산출물 (tailwindcss)
-tests/               174 pytest (11개 파일)
+  bundle.js          로컬 빌드 산출물 (esbuild, git ignore)
+  tailwind.css       로컬 빌드 산출물 (tailwindcss, git ignore)
+tests/               318 pytest
 docs/
-  API.md             REST API 58 routes
+  API.md             REST API reference
   ARCHITECTURE.md    아키텍처 가이드
   SCHEMA.md          DB 스키마 + 마이그레이션
-  QUALITY-GATES.md   8단계 품질 게이트
+  QUALITY-GATES.md   9단계 품질 게이트
+  GOVERNANCE-WIKI-INTEGRATION-PROGRESS.md
+                     codex-project-mgmt 연동 진행 상황
   adr/               6건 아키텍처 결정 기록
   features.html      기능 레퍼런스 (14개 카테고리)
 ```
@@ -243,8 +248,9 @@ sudo systemctl enable --now codex-web-dashboard-retention.timer
 | [`docs/API.md`](docs/API.md) | REST API + WebSocket 계약 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 아키텍처 가이드 |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | DB 스키마, 마이그레이션, SQL 예제 |
-| [`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md) | 8단계 품질 게이트 |
+| [`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md) | 9단계 품질 게이트 |
 | [`docs/adr/`](docs/adr/) | 6건 아키텍처 결정 기록 |
+| [`docs/superpowers/`](docs/superpowers/) | 구현 전후 설계 이력 |
 | [`docs/features.html`](docs/features.html) | 기능 레퍼런스 (80+ 항목) |
 | [`SKILLS.md`](SKILLS.md) | 이 저장소에서 자주 쓰는 Codex/gstack 작업 흐름 |
 | [`CLAUDE.md`](CLAUDE.md) | 코드 수정 불변식 |
@@ -261,4 +267,4 @@ sudo systemctl enable --now codex-web-dashboard-retention.timer
 
 ## 라이선스
 
-자체 사용 도구. PR 전 `pytest tests/ && npm run build && ruff check .` 로 검증.
+자체 사용 도구. PR 전 `docs/QUALITY-GATES.md`의 Gate 1~5 로컬 체크로 검증.

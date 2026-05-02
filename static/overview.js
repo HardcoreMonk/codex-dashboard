@@ -85,9 +85,11 @@ function renderOverviewShell() {
   overviewSetHtml('overviewOpsPreviewBody', `
     <div class="overview-entry-shell">
       <div class="overview-entry-shell__head">
-        <div>
+        <div class="overview-entry-shell__copy">
           <div class="overview-entry-shell__title">Top projects</div>
-          <div class="overview-entry-shell__sub">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</div>
+          <div class="overview-entry-shell__sub">
+            <span class="overview-nowrap overview-entry-shell__hint">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</span>
+          </div>
         </div>
         <button data-action="openCommandPalette" class="overview-entry-shell__action">명령 팔레트</button>
       </div>
@@ -113,7 +115,7 @@ const overviewState = {
   forecast: null,
   plan: null,
   usage: null,
-  projects: [],
+  projects: null,
 };
 
 function overviewStatValue(path, fallback = null) {
@@ -143,6 +145,34 @@ function overviewToneClass(tone) {
   if (tone === 'warning') return 'overview-tone overview-tone--warning';
   if (tone === 'notice') return 'overview-tone overview-tone--notice';
   return 'overview-tone overview-tone--ok';
+}
+
+function overviewSafeNumber(value) {
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+function overviewBarPct(value, max) {
+  const n = overviewSafeNumber(value);
+  const m = Math.max(overviewSafeNumber(max), 1);
+  return Math.max(2, Math.min(100, (n / m) * 100)).toFixed(1);
+}
+
+function overviewProjectMetric(project) {
+  const cost = overviewSafeNumber(project.total_cost);
+  const tokens = overviewSafeNumber(project.total_tokens);
+  const sessions = overviewSafeNumber(project.session_count);
+  if (cost > 0) return { value: cost, label: fmt$(cost), kind: 'cost' };
+  if (tokens > 0) return { value: tokens, label: fmtTok(tokens), kind: 'tokens' };
+  return { value: sessions, label: `${fmtN(sessions)}세션`, kind: 'sessions' };
+}
+
+function overviewRoleRows(byRole) {
+  return [
+    { key: 'assistant', label: 'assistant', value: overviewSafeNumber(byRole.assistant), tone: 'emerald' },
+    { key: 'tool', label: 'tool', value: overviewSafeNumber(byRole.tool), tone: 'cyan' },
+    { key: 'user', label: 'user', value: overviewSafeNumber(byRole.user), tone: 'amber' },
+    { key: 'agent', label: 'agent', value: overviewSafeNumber(byRole.agent), tone: 'purple' },
+  ].filter((row) => row.value > 0);
 }
 
 function overviewStatRows() {
@@ -204,79 +234,77 @@ function renderOverviewOpsSummary() {
   const stats = overviewState.stats || {};
   const today = stats.today || {};
   const all = stats.all_time || {};
-  const forecast = overviewState.forecast || {};
   const plan = overviewState.plan || {};
   const daily = plan.daily || {};
-  const weekly = plan.weekly || {};
+  const periods = overviewState.periods || {};
   const usage = overviewState.usage || {};
-  const rows = overviewStatRows();
   const topSession = (usage.top_sessions || [])[0];
-  const severity = overviewStatusTone(daily.percentage || 0);
-  const forecastSeverity = overviewStatusTone(
-    forecast.projected_eom_cost && daily.limit_cost ? ((forecast.projected_eom_cost / daily.limit_cost) * 100) : 0,
-  );
-  const burnoutLabel = forecast.daily_budget_burnout_seconds != null
-    ? `${overviewDurationLabel(forecast.daily_budget_burnout_seconds)} 후`
-    : '예산 미설정';
+  const totalMessages = overviewSafeNumber(all.messages || usage.messages);
+  const cacheDenom = overviewSafeNumber(all.input_tokens) + overviewSafeNumber(all.cache_read_tokens);
+  const cachePct = cacheDenom > 0 ? (overviewSafeNumber(all.cache_read_tokens) / cacheDenom) * 100 : 0;
+  const periodRows = [
+    { label: '오늘', value: overviewSafeNumber(today.messages || periods.day?.messages), detail: `${fmtN(today.sessions || 0)}세션` },
+    { label: '이번 주', value: overviewSafeNumber(periods.week?.messages), detail: `${fmt$(periods.week?.cost || 0)}` },
+    { label: '이번 달', value: overviewSafeNumber(periods.month?.messages || totalMessages), detail: `${fmtN(all.total_sessions || usage.sessions || 0)}세션` },
+  ];
+  const periodMax = Math.max(...periodRows.map((row) => row.value), 1);
   overviewSetHtml('overviewOpsSummaryBody', `
-    <div class="overview-kpi-grid">
-      <article class="overview-kpi-card overview-kpi-card--primary">
-        <div class="overview-kpi-head">
+    <div class="overview-ops-layout">
+      <article class="overview-signal-card overview-signal-card--primary">
+        <div class="overview-signal-card__head">
           <div>
-            <div class="overview-kpi-label">Today</div>
-            <div class="overview-kpi-value">${fmt$(today.cost_usd)}</div>
+            <div class="overview-kpi-label">Live workload</div>
+            <div class="overview-signal-card__value">${fmtN(today.messages || 0)}건</div>
           </div>
           <span class="overview-chip">live</span>
         </div>
-        <div class="overview-kpi-meta">${fmtN(today.sessions || 0)}세션 · ${fmtTok((today.input_tokens || 0) + (today.output_tokens || 0))}</div>
-        <div class="overview-kpi-sub">${fmtN(today.messages || 0)}메시지 · ${overviewRelativeTime(usage.latest_activity_at || today.last_activity_at)}</div>
-      </article>
-
-      <article class="overview-kpi-card ${overviewToneClass(severity)}">
-        <div class="overview-kpi-head">
-          <div>
-            <div class="overview-kpi-label">Daily budget</div>
-            <div class="overview-kpi-value">${overviewPlanPct(daily)}</div>
-          </div>
-          <span class="overview-chip overview-chip--amber">budget</span>
+        <div class="overview-signal-card__sub">${fmtN(today.sessions || 0)}세션 · ${fmt$(today.cost_usd || 0)} · ${overviewRelativeTime(usage.latest_activity_at || today.last_activity_at)}</div>
+        <div class="overview-inline-metrics">
+          <span>일일 예산 ${overviewPlanPct(daily)}</span>
+          <span>남은 ${overviewDurationLabel(daily.remaining_seconds)}</span>
         </div>
-        <div class="overview-meter">
+        <div class="overview-meter overview-meter--compact">
           <div class="overview-meter__fill" style="width:${Math.min(daily.percentage || 0, 100)}%;"></div>
         </div>
-        <div class="overview-kpi-meta">${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)}</div>
-        <div class="overview-kpi-sub">남은 ${overviewDurationLabel(daily.remaining_seconds)} · 재설정 ${overviewResetLabel(daily.reset_at)}</div>
       </article>
 
-      <article class="overview-kpi-card ${overviewToneClass(forecastSeverity)}">
-        <div class="overview-kpi-head">
-          <div>
-            <div class="overview-kpi-label">Forecast</div>
-            <div class="overview-kpi-value">${fmt$(forecast.projected_eom_cost)}</div>
-          </div>
-          <span class="overview-chip overview-chip--cyan">14d</span>
-        </div>
-        <div class="overview-kpi-meta">일평균 ${fmt$(forecast.avg_cost_per_day || 0)}</div>
-        <div class="overview-kpi-sub">남은 ${forecast.days_left_in_month || 0}일 · burn-out ${burnoutLabel}</div>
-      </article>
-    </div>
-    <div class="overview-kpi-strip">
-      ${rows.map((row) => `
+      <div class="overview-signal-grid">
         <div class="overview-stat-chip">
-          <div class="overview-stat-chip__label">${esc(row.label)}</div>
-          <div class="overview-stat-chip__value">${row.value}</div>
-          <div class="overview-stat-chip__detail">${esc(row.detail)}</div>
+          <div class="overview-stat-chip__label">전체 세션</div>
+          <div class="overview-stat-chip__value">${fmtN(all.total_sessions || usage.sessions || 0)}</div>
+          <div class="overview-stat-chip__detail">누적 작업 흐름</div>
         </div>
-      `).join('')}
-      <div class="overview-stat-chip">
-        <div class="overview-stat-chip__label">전체 규모</div>
-        <div class="overview-stat-chip__value">${fmtN(all.total_sessions || 0)}세션</div>
-        <div class="overview-stat-chip__detail">${fmt$(all.cost_usd || 0)} · ${fmtN(all.messages || 0)}메시지</div>
+        <div class="overview-stat-chip">
+          <div class="overview-stat-chip__label">전체 메시지</div>
+          <div class="overview-stat-chip__value">${fmtN(totalMessages)}</div>
+          <div class="overview-stat-chip__detail">인덱스 기준</div>
+        </div>
+        <div class="overview-stat-chip">
+          <div class="overview-stat-chip__label">캐시 효율</div>
+          <div class="overview-stat-chip__value">${cachePct.toFixed(1)}%</div>
+          <div class="overview-stat-chip__detail">${fmtTok(all.cache_read_tokens || 0)} 읽기</div>
+        </div>
       </div>
-      <div class="overview-stat-chip">
-        <div class="overview-stat-chip__label">캐시 효율</div>
-        <div class="overview-stat-chip__value">${((all.input_tokens || 0) + (all.cache_read_tokens || 0)) > 0 ? (((all.cache_read_tokens || 0) / ((all.input_tokens || 0) + (all.cache_read_tokens || 0))) * 100).toFixed(1) : '0.0'}%</div>
-        <div class="overview-stat-chip__detail">${fmtTok(all.cache_read_tokens || 0)} 읽기 · ${fmtTok(all.cache_creation_tokens || 0)} 생성</div>
-      </div>
+
+      <article class="overview-visual-card overview-visual-card--wide">
+        <div class="overview-visual-card__head">
+          <div>
+            <div class="overview-kpi-label">Message volume</div>
+            <div class="overview-visual-card__title">기간별 메시지 밀도</div>
+          </div>
+          <span class="overview-chip overview-chip--cyan">flow</span>
+        </div>
+        <div class="overview-bar-stack">
+          ${periodRows.map((row) => `
+            <div class="overview-bar-row">
+              <div class="overview-bar-row__label">${esc(row.label)}</div>
+              <div class="overview-bar-row__track"><span style="width:${overviewBarPct(row.value, periodMax)}%;"></span></div>
+              <div class="overview-bar-row__value">${fmtN(row.value)}건</div>
+            </div>
+          `).join('')}
+        </div>
+      </article>
+
       <div class="overview-stat-chip overview-stat-chip--session">
         <div class="overview-stat-chip__label">Top session</div>
         <div class="overview-stat-chip__value overview-stat-chip__value--compact">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
@@ -295,48 +323,62 @@ function renderOverviewProductivitySummary() {
   const topSession = (usage.top_sessions || [])[0];
   const dailyTone = overviewStatusTone(daily.percentage || 0);
   const weeklyTone = overviewStatusTone(weekly.percentage || 0);
-  const forecastTone = overviewStatusTone(
-    forecast.projected_eom_cost && weekly.limit_cost ? ((forecast.projected_eom_cost / weekly.limit_cost) * 100) : 0,
-  );
-  const alertRows = [
-    { label: 'Daily spend', tone: dailyTone, value: overviewPlanPct(daily), detail: `${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)} · 남은 ${overviewDurationLabel(daily.remaining_seconds)}` },
-    { label: 'Weekly spend', tone: weeklyTone, value: overviewPlanPct(weekly), detail: `${fmt$(weekly.used_cost || 0)} / ${fmt$(weekly.limit_cost || 0)} · 재설정 ${overviewResetLabel(weekly.reset_at)}` },
-    { label: 'Forecast risk', tone: forecastTone, value: fmt$(forecast.projected_eom_cost), detail: `${forecast.days_left_in_month || 0}일 남음 · ${fmt$(forecast.avg_cost_per_day || 0)}/day` },
-  ];
+  const roleRows = overviewRoleRows(byRole);
+  const roleTotal = Math.max(roleRows.reduce((sum, row) => sum + row.value, 0), 1);
   overviewSetHtml('overviewProductivitySummaryBody', `
-    <div class="overview-alert-grid">
-      <article class="overview-alert-card ${overviewToneClass(dailyTone)}">
-        <div class="overview-alert-card__head">
-          <span class="overview-alert-card__label">Budget watch</span>
-          <span class="overview-chip overview-chip--amber">${overviewPlanPct(daily)}</span>
+    <div class="overview-productivity-layout">
+      <div class="overview-budget-dials">
+        <article class="overview-dial-card ${overviewToneClass(dailyTone)}">
+          <div class="overview-dial" style="--pct:${Math.min(overviewSafeNumber(daily.percentage), 100)};">
+            <span>${overviewPlanPct(daily)}</span>
+          </div>
+          <div>
+            <div class="overview-alert-card__label">Daily budget</div>
+            <div class="overview-alert-card__value">${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)}</div>
+            <div class="overview-alert-card__detail">남은 ${overviewDurationLabel(daily.remaining_seconds)} · ${fmtN(daily.messages || 0)}건</div>
+          </div>
+        </article>
+        <article class="overview-dial-card ${overviewToneClass(weeklyTone)}">
+          <div class="overview-dial overview-dial--cyan" style="--pct:${Math.min(overviewSafeNumber(weekly.percentage), 100)};">
+            <span>${overviewPlanPct(weekly)}</span>
+          </div>
+          <div>
+            <div class="overview-alert-card__label">Weekly budget</div>
+            <div class="overview-alert-card__value">${fmt$(weekly.used_cost || 0)} / ${fmt$(weekly.limit_cost || 0)}</div>
+            <div class="overview-alert-card__detail">재설정 ${overviewResetLabel(weekly.reset_at)} · ${fmtN(weekly.messages || 0)}건</div>
+          </div>
+        </article>
+      </div>
+
+      <article class="overview-visual-card">
+        <div class="overview-visual-card__head">
+          <div>
+            <div class="overview-kpi-label">Role mix</div>
+            <div class="overview-visual-card__title">${fmtN(usage.sessions || 0)}세션 · ${fmtN(usage.messages || 0)}메시지</div>
+          </div>
+          <span class="overview-chip overview-chip--emerald">mix</span>
         </div>
-        <div class="overview-alert-card__value">${fmt$(daily.used_cost || 0)} / ${fmt$(daily.limit_cost || 0)}</div>
-        <div class="overview-alert-card__detail">남은 ${overviewDurationLabel(daily.remaining_seconds)} · ${fmtN(daily.messages || 0)}건</div>
+        <div class="overview-role-stack" aria-label="역할별 메시지 분포">
+          ${roleRows.length ? roleRows.map((row) => `
+            <span class="overview-role-stack__segment overview-role-stack__segment--${row.tone}" style="width:${overviewBarPct(row.value, roleTotal)}%;"></span>
+          `).join('') : '<span class="overview-role-stack__segment overview-role-stack__segment--muted" style="width:100%;"></span>'}
+        </div>
+        <div class="overview-role-list">
+          ${roleRows.map((row) => `
+            <div class="overview-role-row">
+              <span><i class="overview-role-dot overview-role-dot--${row.tone}"></i>${esc(row.label)}</span>
+              <strong>${fmtN(row.value)}</strong>
+            </div>
+          `).join('')}
+        </div>
       </article>
 
-      <article class="overview-alert-card ${overviewToneClass(weeklyTone)}">
-        <div class="overview-alert-card__head">
-          <span class="overview-alert-card__label">Weekly watch</span>
-          <span class="overview-chip overview-chip--cyan">${overviewPlanPct(weekly)}</span>
-        </div>
-        <div class="overview-alert-card__value">${fmt$(weekly.used_cost || 0)} / ${fmt$(weekly.limit_cost || 0)}</div>
-        <div class="overview-alert-card__detail">재설정 ${overviewResetLabel(weekly.reset_at)} · ${fmtN(weekly.messages || 0)}건</div>
-      </article>
-    </div>
-    <div class="overview-alert-feed">
-      ${alertRows.map((row) => `
-        <div class="overview-alert-feed__row ${overviewToneClass(row.tone)}">
-          <div class="overview-alert-feed__label">${esc(row.label)}</div>
-          <div class="overview-alert-feed__value">${row.value}</div>
-          <div class="overview-alert-feed__detail">${esc(row.detail)}</div>
-        </div>
-      `).join('')}
-      <div class="overview-alert-feed__row">
-        <div class="overview-alert-feed__label">Role mix</div>
-        <div class="overview-alert-feed__value">${fmtN(usage.sessions || 0)}세션</div>
-        <div class="overview-alert-feed__detail">user ${fmtN(byRole.user || 0)} · assistant ${fmtN(byRole.assistant || 0)} · tool ${fmtN(byRole.tool || 0)} · agent ${fmtN(byRole.agent || 0)}</div>
+      <div class="overview-alert-feed__row overview-alert-feed__row--compact">
+        <div class="overview-alert-feed__label">Forecast risk</div>
+        <div class="overview-alert-feed__value">${fmt$(forecast.projected_eom_cost || 0)}</div>
+        <div class="overview-alert-feed__detail">${forecast.days_left_in_month || 0}일 남음 · ${fmt$(forecast.avg_cost_per_day || 0)}/day</div>
       </div>
-      <div class="overview-alert-feed__row">
+      <div class="overview-alert-feed__row overview-alert-feed__row--compact">
         <div class="overview-alert-feed__label">Latest active</div>
         <div class="overview-alert-feed__value">${esc(topSession?.session_title || topSession?.session_id || '—')}</div>
         <div class="overview-alert-feed__detail">${esc(topSession ? `${topSession.project_name || '—'} · ${fmtN(topSession.message_count || 0)} messages` : 'no recent sessions')}</div>
@@ -405,36 +447,31 @@ function renderOverviewReportingSummary() {
 
 function renderOverviewActionGrid() {
   overviewSetHtml('overviewActionBody', `
-    <div class="grid gap-3 sm:grid-cols-2">
-      <button data-action="openCommandPalette" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+    <div class="overview-action-grid">
+      <button data-action="openCommandPalette" class="overview-action-card">
         <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Command</div>
         <div class="mt-2 text-sm font-bold text-white/90">명령 팔레트</div>
         <div class="mt-1 text-[11px] leading-5 text-white/46">검색, 점프, 모달을 한 번에 여는 빠른 진입점입니다.</div>
       </button>
-      <button data-action="drillToSessionsToday" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+      <button data-action="drillToSessionsToday" class="overview-action-card">
         <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Today</div>
         <div class="mt-2 text-sm font-bold text-white/90">오늘 세션</div>
         <div class="mt-1 text-[11px] leading-5 text-white/46">오늘 날짜로 세션 탐색을 바로 맞춥니다.</div>
       </button>
-      <button data-action="drillToSessionsWeek" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
+      <button data-action="showView" data-arg="explore" class="overview-action-card">
+        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Explore</div>
+        <div class="mt-2 text-sm font-bold text-white/90">작업 탐색</div>
+        <div class="mt-1 text-[11px] leading-5 text-white/46">검색, 세션, 대화 뷰어를 엽니다.</div>
+      </button>
+      <button data-action="showView" data-arg="analysis" class="overview-action-card">
+        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Analyze</div>
+        <div class="mt-2 text-sm font-bold text-white/90">사용 분석</div>
+        <div class="mt-1 text-[11px] leading-5 text-white/46">비용, 모델, 타임라인 화면으로 전환합니다.</div>
+      </button>
+      <button data-action="drillToSessionsWeek" class="overview-action-card overview-action-card--wide">
         <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Week</div>
         <div class="mt-2 text-sm font-bold text-white/90">이번 주 세션</div>
         <div class="mt-1 text-[11px] leading-5 text-white/46">이번 주 범위로 요약된 세션 흐름을 봅니다.</div>
-      </button>
-      <button data-action="showView" data-arg="explore" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
-        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Navigate</div>
-        <div class="mt-2 text-sm font-bold text-white/90">탐색으로 이동</div>
-        <div class="mt-1 text-[11px] leading-5 text-white/46">검색 중심 워크스페이스로 전환합니다.</div>
-      </button>
-      <button data-action="showView" data-arg="analysis" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
-        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Navigate</div>
-        <div class="mt-2 text-sm font-bold text-white/90">분석으로 이동</div>
-        <div class="mt-1 text-[11px] leading-5 text-white/46">비용과 시계열 분석 화면으로 전환합니다.</div>
-      </button>
-      <button data-action="showView" data-arg="admin" class="rounded-[22px] border border-white/[0.07] bg-white/[0.03] p-4 text-left transition hover:border-accent/30 hover:bg-accent/10">
-        <div class="text-[10px] font-bold uppercase tracking-[0.16em] text-white/34">Navigate</div>
-        <div class="mt-2 text-sm font-bold text-white/90">관리로 이동</div>
-        <div class="mt-1 text-[11px] leading-5 text-white/46">백업, 로그, 운영 도구를 여는 포털입니다.</div>
       </button>
     </div>`);
 }
@@ -443,9 +480,11 @@ function renderOverviewOpsPreview() {
   overviewSetHtml('overviewOpsPreviewBody', `
     <div class="overview-entry-shell">
       <div class="overview-entry-shell__head">
-        <div>
+        <div class="overview-entry-shell__copy">
           <div class="overview-entry-shell__title">Top projects</div>
-          <div class="overview-entry-shell__sub">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</div>
+          <div class="overview-entry-shell__sub">
+            <span class="overview-nowrap overview-entry-shell__hint">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</span>
+          </div>
         </div>
         <button data-action="openCommandPalette" class="overview-entry-shell__action">명령 팔레트</button>
       </div>
@@ -453,6 +492,9 @@ function renderOverviewOpsPreview() {
         <div class="overview-project-empty dots">로딩 중</div>
       </div>
     </div>`);
+  if (Array.isArray(overviewState.projects)) {
+    renderTopProjects(overviewState.projects);
+  }
 }
 
 function renderOverviewProductivityPreview() {
@@ -589,11 +631,13 @@ function renderTopProjects(projects) {
     c.innerHTML = '<div class="overview-project-empty">데이터 없음</div>';
     return;
   }
-  const mx = Math.max(...projects.map(p => p.total_cost || 0), 1);
+  const metrics = projects.map((p) => overviewProjectMetric(p));
+  const mx = Math.max(...metrics.map((metric) => metric.value), 1);
   c.textContent = '';
   projects.forEach((p, i) => {
     const row = document.createElement('article');
-    const pct = ((p.total_cost || 0) / mx * 100).toFixed(1);
+    const metric = metrics[i];
+    const pct = overviewBarPct(metric.value, mx);
     const tone = i === 0 ? 'overview-project-row--first' : i === 1 ? 'overview-project-row--second' : i === 2 ? 'overview-project-row--third' : '';
     row.className = `overview-project-row ${tone}`;
     row.tabIndex = 0;
@@ -618,10 +662,10 @@ function renderTopProjects(projects) {
       <div class="overview-project-main">
         <div class="overview-project-main__head">
           <div class="overview-project-name">${idleBadge}${esc(p.project_name || '—')}${liveBadge}</div>
-          <div class="overview-project-cost">${fmt$(p.total_cost)}</div>
+          <div class="overview-project-cost">${esc(metric.label)}</div>
         </div>
         <div class="overview-project-bar"><span style="width:${pct}%;"></span></div>
-        <div class="overview-project-meta">${fmtTok(p.total_tokens || 0)} · ${fmtN(p.session_count || 0)}세션 · ${overviewRelativeTime(p.last_activity_at)}</div>
+        <div class="overview-project-meta">${metric.kind === 'cost' ? fmtTok(p.total_tokens || 0) : fmt$(p.total_cost || 0)} · ${fmtN(p.session_count || 0)}세션 · ${overviewRelativeTime(p.last_activity_at)}</div>
         ${cleaned ? `<div class="overview-project-preview" title="${esc(lm?.preview || '')}">${esc(cleaned)}</div>` : '<div class="overview-project-preview overview-project-preview--empty">assistant 메시지 없음</div>'}
       </div>
       <button data-peek-btn type="button" class="overview-project-peek" title="마지막 대화 미리보기" aria-label="마지막 대화 미리보기">미리보기</button>
@@ -660,7 +704,7 @@ function loadOverviewDashboard() {
     forecast: null,
     plan: null,
     usage: null,
-    projects: [],
+    projects: null,
   });
   renderOverviewShell();
   renderOverviewConsole();
@@ -688,6 +732,47 @@ async function loadOverviewPlanUsage() {
 // showProjectDetail.
 
 // ─── Stats (hero cost totals + secondary chips) ────────────────────────
+let dashboardTotalFitRaf = 0;
+
+function scheduleDashboardTotalFit() {
+  if (dashboardTotalFitRaf) cancelAnimationFrame(dashboardTotalFitRaf);
+  dashboardTotalFitRaf = requestAnimationFrame(() => {
+    dashboardTotalFitRaf = 0;
+    fitDashboardTotalStatus();
+  });
+}
+
+function fitDashboardTotalStatus() {
+  const el = document.getElementById('hdrTotal');
+  if (!el) return;
+
+  el.style.fontSize = '';
+  el.style.letterSpacing = '';
+
+  const available = el.clientWidth;
+  if (!available) return;
+
+  let size = Math.min(16, parseFloat(getComputedStyle(el).fontSize) || 14);
+  const minSize = 9.5;
+  el.style.fontSize = `${size}px`;
+
+  while (el.scrollWidth > el.clientWidth + 1 && size > minSize) {
+    size -= 0.5;
+    el.style.fontSize = `${size}px`;
+  }
+
+  if (el.scrollWidth > el.clientWidth + 1) {
+    el.style.letterSpacing = '-0.02em';
+  }
+}
+
+function setDashboardTotal(text) {
+  set('hdrTotal', text);
+  scheduleDashboardTotalFit();
+}
+
+window.addEventListener('resize', scheduleDashboardTotalFit);
+
 async function loadStats() {
   try {
     const d = await safeFetch('/api/codex/stats');
@@ -715,7 +800,7 @@ function renderStats(data) {
   set('statCacheEff', cEff.toFixed(1) + '%');
   set('statCacheSaved', `${fmtTok(a.cache_read_tokens || 0)} 읽기 · ${fmtTok(a.cache_creation_tokens || 0)} 생성`);
   set('hdrToday', `오늘: ${fmt$(t.cost_usd)}`);
-  set('hdrTotal', `전체: ${fmt$(a.cost_usd)}`);
+  setDashboardTotal(`전체: ${fmt$(a.cost_usd)}`);
 }
 
 async function loadCodexUsageSummary() {
@@ -725,7 +810,7 @@ async function loadCodexUsageSummary() {
     const byRole = summary.by_role || {};
     const codexLine = `Codex ${fmtN(summary.sessions || 0)}세션 · ${fmtN(summary.messages || 0)}메시지`;
     set('statAllMessages', `${fmtN((state.stats?.all_time?.messages) || 0)} 메시지 · ${codexLine}`);
-    set('hdrTotal', `전체: ${fmt$(state.stats?.all_time?.cost_usd || 0)} · ${codexLine}`);
+    setDashboardTotal(`전체: ${fmt$(state.stats?.all_time?.cost_usd || 0)} · ${codexLine}`);
     const dayDetail = document.getElementById('pdDayDetail');
     if (dayDetail) {
       dayDetail.title = `user ${fmtN(byRole.user || 0)} · assistant ${fmtN(byRole.assistant || 0)} · tool ${fmtN(byRole.tool || 0)} · agent ${fmtN(byRole.agent || 0)}`;
@@ -866,9 +951,7 @@ async function loadTopProjects() {
     const data = await safeFetch('/api/codex/projects/top?limit=5&with_last_message=true');
     const projects = data.projects || [];
     overviewState.projects = projects;
-    const c = document.getElementById('topProjectsList');
-    renderTopProjects(projects);
-    renderOverviewConsole();
+    renderOverviewOpsPreview();
   } catch (e) { reportError('loadTopProjects', e); }
 }
 
@@ -943,7 +1026,7 @@ function topPreviewOpen(project) {
   setTimeout(() => { panel.querySelector('button')?.focus(); }, 100);
 
   // Highlight active row
-  document.querySelectorAll('#topProjectsList > div').forEach(r => {
+  document.querySelectorAll('#topProjectsList > article').forEach(r => {
     const match = r.dataset.projectName === topPreviewState.projectName
                && r.dataset.projectPath === topPreviewState.projectPath;
     r.classList.toggle('ring-1', match);
@@ -964,7 +1047,7 @@ function topPreviewClose() {
     backdrop.style.opacity = '0';
     backdrop.style.pointerEvents = 'none';
   }
-  document.querySelectorAll('#topProjectsList > div').forEach(r => {
+  document.querySelectorAll('#topProjectsList > article').forEach(r => {
     r.classList.remove('ring-1', 'ring-accent/30');
   });
 }

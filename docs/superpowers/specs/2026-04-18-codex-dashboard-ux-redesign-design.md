@@ -1,5 +1,7 @@
 # Codex Dashboard UX Redesign Design
 
+> 현행화 메모 (2026-04-30): 이 문서는 설계 이력이다. 현재 제품/운영/검증 기준은 `AGENTS.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/QUALITY-GATES.md`를 우선한다.
+
 ## 목적
 
 Codex Dashboard를 "기능 나열형 다기능 화면"에서 "운영 판단 중심 콘솔"로 재구성한다.

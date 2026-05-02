@@ -55,21 +55,21 @@ class WatcherMetrics:
             try:
                 self.scan_files.labels(phase=phase).inc(n)
             except Exception:
-                pass
+                logger.debug("scan_files metric update failed", exc_info=True)
 
     def inc_new_messages(self, n: int) -> None:
         if self.new_messages is not None and n:
             try:
                 self.new_messages.inc(n)
             except Exception:
-                pass
+                logger.debug("new_messages metric update failed", exc_info=True)
 
     def inc_retry(self, outcome: str) -> None:
         if self.retries is not None:
             try:
                 self.retries.labels(outcome=outcome).inc()
             except Exception:
-                pass
+                logger.debug("retries metric update failed", exc_info=True)
 
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ def _codex_message_uuid(record, role: str, preview: str) -> str:
         role,
         preview,
     ])
-    return hashlib.sha1(key.encode('utf-8')).hexdigest()
+    return hashlib.sha1(key.encode('utf-8'), usedforsecurity=False).hexdigest()
 
 
 def _is_valid_codex_record(record, project_path: str, project_name: str) -> bool:
@@ -244,7 +244,7 @@ class CodexFileWatcher:
                 self._observer.stop()
                 self._observer.join(timeout=3)
             except Exception:
-                pass
+                logger.debug("watchdog observer stop failed", exc_info=True)
             self._observer = None
 
     async def _lifecycle(self):
@@ -315,7 +315,7 @@ class CodexFileWatcher:
             try:
                 self._observer.stop()
             except Exception:
-                pass
+                logger.debug("watchdog observer restart stop failed", exc_info=True)
             self._observer = None
             self._start_observer()
 

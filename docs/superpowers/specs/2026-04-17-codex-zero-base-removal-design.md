@@ -1,5 +1,7 @@
 # Codex 제로베이스 재기반화 설계
 
+> 현행화 메모 (2026-04-30): 이 문서는 전환 설계 이력이다. 현재 저장소의 운영 기준은 Codex 전용 `AGENTS.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/SCHEMA.md`를 우선한다. 아래 legacy/제거 대상명은 당시 제거 범위를 설명하기 위한 역사적 맥락이다.
+
 ## 문서 기준
 
 이 설계는 저장소를 Claude 호환 레이어 위에 얹힌 Codex 파생 제품으로 보지 않고, Codex 전용 제품으로 재정의한다. 구현, 스키마, 문서, 서비스 식별자는 모두 Codex 기준으로 맞춘다.

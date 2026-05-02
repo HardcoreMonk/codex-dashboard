@@ -36,6 +36,7 @@ Codex Dashboard 프로젝트의 최상위 기준 문서.
 - `docs/ARCHITECTURE.md`: 시스템 구조와 데이터 흐름
 - `docs/SCHEMA.md`: SQLite 스키마와 마이그레이션
 - `docs/QUALITY-GATES.md`: 머지 전 검증 기준
+- `docs/GOVERNANCE-WIKI-INTEGRATION-PROGRESS.md`: `codex-project-mgmt` 연동 진행 상황
 - `docs/adr/*`: 확정된 설계 결정 기록
 
 공통 정책은 이 문서에 두고, 나머지 문서는 각자 자기 책임 범위만 유지한다.

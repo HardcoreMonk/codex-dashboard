@@ -10,6 +10,8 @@ import os
 import re
 import secrets
 import sqlite3
+import subprocess
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -39,13 +41,15 @@ try:
 except ImportError:
     _PROMETHEUS_OK = False
 
+from codex_parser import normalize_codex_record
+from codex_watcher import CodexFileWatcher, WatcherMetrics
 from database import (
     DB_PATH,
     _write_lock,
     check_integrity,
     close_thread_connections,
+    delete_codex_session,
     get_codex_agents_summary,
-    get_codex_ingest_status,
     get_codex_message_context,
     get_codex_message_position,
     get_codex_models,
@@ -60,15 +64,12 @@ from database import (
     init_db,
     list_codex_sessions,
     list_codex_sessions_table,
-    delete_codex_session,
     read_db,
     search_codex_messages,
     set_codex_session_pinned,
     wal_checkpoint,
     write_db,
 )
-from codex_parser import normalize_codex_record, process_record
-from codex_watcher import CodexFileWatcher, WatcherMetrics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,6 +78,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / 'static'
+ZONE_ROOT = Path(os.environ.get('CODEX_ZONE_ROOT', '/data/projects/codex-zone')).resolve()
+GOVERNANCE_REPO_DIR = Path(
+    os.environ.get('CODEX_GOVERNANCE_REPO_DIR', str(ZONE_ROOT / 'codex-project-mgmt'))
+).resolve()
+PROJECTS_REGISTRY_PATH = Path(
+    os.environ.get('CODEX_PROJECTS_REGISTRY', str(ZONE_ROOT / 'projects.yaml'))
+).resolve()
+WIKI_DIR = Path(os.environ.get('CODEX_ZONE_WIKI_DIR', str(ZONE_ROOT / 'wiki'))).resolve()
+RAW_DIR = Path(os.environ.get('CODEX_ZONE_RAW_DIR', str(ZONE_ROOT / 'raw'))).resolve()
+AUDIT_DIR = Path(os.environ.get('CODEX_ZONE_AUDIT_DIR', str(WIKI_DIR / 'audit'))).resolve()
+PROJECT_SYNC_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'project-sync.sh'
+WIKI_CHECK_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'wiki-check.sh'
+ZONE_AUDIT_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'zone-audit.sh'
+ZONE_TRACK_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'zone-track.sh'
+_GOVERNANCE_REGISTRY_LOCK = threading.Lock()
 BACKUP_DIR = Path(
     os.environ.get(
         'DASHBOARD_BACKUP_DIR',
@@ -323,7 +339,7 @@ if _AUTH_PW:
                 if hmac.compare_digest(pw, _AUTH_PW):
                     return await call_next(request)
             except Exception:
-                pass
+                logger.debug("invalid basic auth header", exc_info=True)
         # Browser → redirect to login page; API → 401
         if 'text/html' in request.headers.get('accept', ''):
             return Response(status_code=302,
@@ -354,7 +370,7 @@ if _PROMETHEUS_OK:
                 METRIC_LATENCY.labels(
                     method=request.method, path=path_tpl).observe(elapsed)
             except Exception:
-                pass
+                logger.debug("request metric update failed", exc_info=True)
 
 
 # ─── Preview cleanup (server-side) ───────────────────────────────────────────
@@ -542,7 +558,7 @@ class LoginPayload(BaseModel):
 async def api_login(payload: LoginPayload, request: Request):
     if not _AUTH_PW:
         return {'ok': True, 'message': 'no password configured'}
-    client_ip = request.client.host if request.client else '0.0.0.0'
+    client_ip = request.client.host if request.client else 'unknown'
     if not _check_rate_limit(client_ip):
         return JSONResponse(
             {'ok': False, 'error': 'too many attempts, try again later'},
@@ -593,7 +609,7 @@ def _ws_auth_ok(ws: WebSocket) -> bool:
             if hmac.compare_digest(pw, _AUTH_PW):
                 return True
         except Exception:
-            pass
+            logger.debug("invalid websocket basic auth header", exc_info=True)
     return False
 
 
@@ -1138,6 +1154,21 @@ def _codex_plan_usage_payload() -> dict:
 
 def _has_codex_runtime_data(db) -> bool:
     return bool(int(db.execute('SELECT COUNT(*) FROM codex_sessions').fetchone()[0] or 0))
+
+
+def _table_exists(db, table: str) -> bool:
+    return bool(db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ? LIMIT 1",
+        (table,),
+    ).fetchone())
+
+
+def _legacy_sessions_table_exists(db) -> bool:
+    return _table_exists(db, 'sessions')
+
+
+def _legacy_messages_table_exists(db) -> bool:
+    return _table_exists(db, 'messages')
 
 
 def _codex_forecast_payload(days: int = 14) -> dict:
@@ -1889,6 +1920,8 @@ def api_usage_hourly(hours: int = Query(24, ge=1, le=168)):
                 (f'-{hours} hours',),
             ).fetchall()
             return {'data': [dict(r) for r in rows]}
+        if not _legacy_messages_table_exists(db):
+            return {'data': []}
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
         rows = db.execute('''
@@ -1928,6 +1961,8 @@ def api_usage_daily(days: int = Query(30, ge=1, le=365)):
                 (f'-{days} days',),
             ).fetchall()
             return {'data': [dict(r) for r in rows]}
+        if not _legacy_messages_table_exists(db):
+            return {'data': []}
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
         rows = db.execute('''
@@ -1968,6 +2003,9 @@ def api_models(
     with read_db() as db:
         if _has_codex_runtime_data(db):
             return get_codex_models(sort=sort, order=order, page=page, per_page=per_page)
+        if not _legacy_messages_table_exists(db):
+            return {'models': [], 'sort': sort, 'order': str(order).lower(),
+                    'page': page, 'per_page': per_page}
     sort_col = _MODELS_SORT_MAP.get(sort, 'message_count')
     order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
     offset = (page - 1) * per_page
@@ -2015,7 +2053,6 @@ def api_timeline(
     """
     # Normalise date_to to end-of-day if only a date was supplied
     dt = date_to if len(date_to) > 10 else date_to + 'T23:59:59Z'
-    sub_filter = '' if include_subagents else 'AND is_subagent = 0'
     if node and node != 'local':
         with read_db() as db:
             off = _tz_offset(db)
@@ -2181,6 +2218,14 @@ def api_projects(
     """Project roll-up. ``session_count`` is PARENT sessions only;
     ``subagent_count`` is the spawned-subagent count. All cost/token totals
     include everything (parents + subagents)."""
+    with read_db() as db:
+        if _has_codex_runtime_data(db) or not _legacy_sessions_table_exists(db):
+            return get_codex_projects(
+                sort=sort,
+                order=order,
+                page=page,
+                per_page=per_page,
+            )
     sort_col = _PROJECTS_SORT_MAP.get(sort, 'last_active')
     order_sql = 'ASC' if str(order).lower() == 'asc' else 'DESC'
     offset = (page - 1) * per_page
@@ -2322,6 +2367,8 @@ def api_forecast(days: int = Query(14, ge=3, le=60)):
     """
     with read_db() as db:
         if _has_codex_runtime_data(db):
+            return _codex_forecast_payload(days)
+        if not _legacy_messages_table_exists(db):
             return _codex_forecast_payload(days)
         off = _tz_offset(db)
         off_sql = f'+{off} hours' if off >= 0 else f'{off} hours'
@@ -2472,6 +2519,8 @@ def api_usage_periods():
     with read_db() as db:
         if _has_codex_runtime_data(db):
             return _codex_usage_periods_payload()
+        if not _legacy_messages_table_exists(db):
+            return _codex_usage_periods_payload()
         tz = _user_tz(db)
         now = datetime.now(tz)
 
@@ -2548,6 +2597,8 @@ def api_plan_usage():
     with read_db() as db:
         if _has_codex_runtime_data(db):
             return _codex_plan_usage_payload()
+        if not _legacy_messages_table_exists(db):
+            return _codex_plan_usage_payload()
         cfg = _plan_cfg(db)
         r_hour = cfg['reset_hour']
         r_wd   = cfg['reset_weekday']
@@ -2615,6 +2666,8 @@ def api_session_delete(session_id: str, confirm: bool = Query(False)):
                 'message_count': codex_row['message_count'],
             }
         with read_db() as db:
+            if not _legacy_sessions_table_exists(db):
+                return JSONResponse({'error': 'Not found'}, status_code=404)
             row = db.execute(
                 'SELECT project_name, message_count FROM sessions WHERE id = ?',
                 (session_id,)).fetchone()
@@ -2628,8 +2681,12 @@ def api_session_delete(session_id: str, confirm: bool = Query(False)):
         logger.info("Deleted Codex session %s (%d messages)", session_id, codex_result['messages_deleted'])
         return codex_result
     with write_db() as db:
-        msg_del = db.execute(
-            'DELETE FROM messages WHERE session_id = ?', (session_id,)).rowcount
+        if not _legacy_sessions_table_exists(db):
+            return {'deleted': False, 'messages_deleted': 0}
+        msg_del = 0
+        if _legacy_messages_table_exists(db):
+            msg_del = db.execute(
+                'DELETE FROM messages WHERE session_id = ?', (session_id,)).rowcount
         sess_del = db.execute(
             'DELETE FROM sessions WHERE id = ?', (session_id,)).rowcount
     logger.info("Deleted session %s (%d messages)", session_id, msg_del)
@@ -2641,6 +2698,8 @@ def api_session_pin(session_id: str):
     if set_codex_session_pinned(session_id, True):
         return {'ok': True}
     with write_db() as db:
+        if not _legacy_sessions_table_exists(db):
+            return JSONResponse({'error': 'Not found'}, status_code=404)
         db.execute('UPDATE sessions SET pinned = 1 WHERE id = ?', (session_id,))
     return {'ok': True}
 
@@ -2650,6 +2709,8 @@ def api_session_unpin(session_id: str):
     if set_codex_session_pinned(session_id, False):
         return {'ok': True}
     with write_db() as db:
+        if not _legacy_sessions_table_exists(db):
+            return JSONResponse({'error': 'Not found'}, status_code=404)
         db.execute('UPDATE sessions SET pinned = 0 WHERE id = ?', (session_id,))
     return {'ok': True}
 
@@ -2856,6 +2917,14 @@ def api_export_csv():
         w.writerow(_CSV_COLS)
         yield buf.getvalue()
         with read_db() as db:
+            if _has_codex_runtime_data(db) or not _legacy_sessions_table_exists(db):
+                buf = io.StringIO()
+                w = csv.writer(buf)
+                for d in _codex_csv_rows():
+                    w.writerow([d.get(c, '') if d.get(c) is not None else ''
+                                for c in _CSV_COLS])
+                yield buf.getvalue()
+                return
             total = db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]
             if total == 0:
                 buf = io.StringIO()
@@ -2989,7 +3058,8 @@ def _ingest_codex_remote_record(record: dict, file_path: str, source_node: str) 
             normalized.timestamp,
             role,
             preview,
-        ]).encode('utf-8')
+        ]).encode('utf-8'),
+        usedforsecurity=False,
     ).hexdigest()
 
     from database import store_codex_message
@@ -3163,6 +3233,450 @@ def _audit(action: str, request: Optional[Request], *, status: str = 'ok', detai
         logger.exception("Audit log insert failed for action=%s", action)
 
 
+def _parse_governance_scalar(value: str):
+    value = value.strip()
+    if value and value[0:1] in {"'", '"'} and value[-1:] == value[0]:
+        value = value[1:-1]
+    lower = value.lower()
+    if lower == 'true':
+        return True
+    if lower == 'false':
+        return False
+    return value
+
+
+def _parse_governance_projects(path: Path) -> list[dict]:
+    projects: list[dict] = []
+    current: Optional[dict] = None
+    in_projects = False
+    if not path.exists():
+        return projects
+    for raw in path.read_text(encoding='utf-8').splitlines():
+        line = raw.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        if stripped == 'projects:':
+            in_projects = True
+            continue
+        if not in_projects:
+            continue
+        item = re.match(r'^\s*-\s+([A-Za-z0-9_]+):\s*(.*)$', line)
+        if item:
+            if current:
+                projects.append(current)
+            current = {item.group(1): _parse_governance_scalar(item.group(2))}
+            continue
+        kv = re.match(r'^\s+([A-Za-z0-9_]+):\s*(.*)$', line)
+        if kv and current is not None:
+            current[kv.group(1)] = _parse_governance_scalar(kv.group(2))
+            continue
+        raise ValueError(f"Unsupported projects.yaml line: {raw}")
+    if current:
+        projects.append(current)
+    return projects
+
+
+def _path_meta(path: Path) -> dict:
+    try:
+        stat = path.stat()
+        return {
+            'path': str(path),
+            'exists': True,
+            'size_bytes': stat.st_size,
+            'mtime': datetime.fromtimestamp(stat.st_mtime, _tz.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        }
+    except OSError:
+        return {'path': str(path), 'exists': False, 'size_bytes': 0, 'mtime': None}
+
+
+def _wiki_page_listing(limit: int = 300) -> list[dict]:
+    if not WIKI_DIR.exists():
+        return []
+    pages = []
+    for page in sorted(WIKI_DIR.rglob('*.md'))[:limit]:
+        meta = _path_meta(page)
+        meta['relative_path'] = str(page.relative_to(WIKI_DIR))
+        meta['slug'] = page.stem
+        pages.append(meta)
+    return pages
+
+
+def _safe_wiki_markdown_path(page_path: str) -> Optional[Path]:
+    rel = page_path.strip().lstrip('/')
+    if not rel or '\x00' in rel:
+        return None
+    if not rel.endswith('.md'):
+        rel += '.md'
+    candidate = (WIKI_DIR / rel).resolve()
+    try:
+        candidate.relative_to(WIKI_DIR.resolve())
+    except ValueError:
+        return None
+    if candidate.suffix.lower() != '.md':
+        return None
+    return candidate
+
+
+def _read_governance_markdown(path: Path) -> dict:
+    text = path.read_text(encoding='utf-8', errors='replace')
+    return {
+        **_path_meta(path),
+        'relative_path': str(path.relative_to(WIKI_DIR)) if path.is_relative_to(WIKI_DIR) else path.name,
+        'text': text[:200000],
+        'truncated': len(text) > 200000,
+    }
+
+
+def _governance_audit_metric_key(label: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')
+
+
+def _parse_governance_audit_metrics(text: str) -> dict:
+    metrics = {}
+    for raw in text.splitlines():
+        m = re.match(r'^-\s+([^:]+):\s+`([^`]*)`', raw)
+        if not m:
+            continue
+        key = _governance_audit_metric_key(m.group(1))
+        value = m.group(2).strip()
+        metrics[key] = int(value) if re.fullmatch(r'-?\d+', value) else value
+    return metrics
+
+
+def _read_governance_audit_latest(*, include_text: bool = False) -> dict:
+    path = AUDIT_DIR / 'zone-audit-latest.md'
+    meta = _path_meta(path)
+    data = {
+        'latest': meta,
+        'metrics': {},
+        'relative_path': None,
+        'text': '',
+        'truncated': False,
+    }
+    if not path.exists():
+        return data
+    text = path.read_text(encoding='utf-8', errors='replace')
+    try:
+        data['relative_path'] = str(path.relative_to(WIKI_DIR))
+    except ValueError:
+        data['relative_path'] = path.name
+    data['metrics'] = _parse_governance_audit_metrics(text)
+    if include_text:
+        data['text'] = text[:200000]
+        data['truncated'] = len(text) > 200000
+    return data
+
+
+def _trunc_governance_output(text: Optional[str], limit: int = 20000) -> str:
+    if not text:
+        return ''
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f'\n... truncated {len(text) - limit} chars ...'
+
+
+def _run_governance_script(script: Path, *, timeout_s: int = 60) -> dict:
+    allowed = {
+        PROJECT_SYNC_SCRIPT.resolve(),
+        WIKI_CHECK_SCRIPT.resolve(),
+        ZONE_TRACK_SCRIPT.resolve(),
+    }
+    resolved = script.resolve()
+    if resolved not in allowed:
+        return {
+            'ok': False,
+            'returncode': 126,
+            'script': str(script),
+            'stdout': '',
+            'stderr': 'script is not allowlisted',
+            'duration_ms': 0,
+        }
+    if not script.exists():
+        return {
+            'ok': False,
+            'returncode': 127,
+            'script': str(script),
+            'stdout': '',
+            'stderr': 'script not found',
+            'duration_ms': 0,
+        }
+
+    env = os.environ.copy()
+    env.update({
+        'ZONE_DIR': str(ZONE_ROOT),
+        'PROJECTS_FILE': str(PROJECTS_REGISTRY_PATH),
+        'WIKI_DIR': str(WIKI_DIR),
+        'RAW_DIR': str(RAW_DIR),
+    })
+    start = time.time()
+    try:
+        proc = subprocess.run(
+            ['bash', str(script)],
+            cwd=str(GOVERNANCE_REPO_DIR),
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout_s,
+            check=False,
+        )
+        duration_ms = int((time.time() - start) * 1000)
+        return {
+            'ok': proc.returncode == 0,
+            'returncode': proc.returncode,
+            'script': str(script),
+            'stdout': _trunc_governance_output(proc.stdout),
+            'stderr': _trunc_governance_output(proc.stderr),
+            'duration_ms': duration_ms,
+        }
+    except subprocess.TimeoutExpired as e:
+        duration_ms = int((time.time() - start) * 1000)
+        return {
+            'ok': False,
+            'returncode': 124,
+            'script': str(script),
+            'stdout': _trunc_governance_output(e.stdout if isinstance(e.stdout, str) else ''),
+            'stderr': f'script timed out after {timeout_s} seconds',
+            'duration_ms': duration_ms,
+        }
+
+
+class GovernanceProjectCreate(BaseModel):
+    id: str = Field(..., min_length=1, max_length=80)
+    path: Optional[str] = Field(None, max_length=160)
+    title: Optional[str] = Field(None, max_length=120)
+    kind: str = Field('project', max_length=40)
+    summary: Optional[str] = Field(None, max_length=500)
+    wiki: bool = True
+    claude_compat: bool = False
+    sync_after: bool = True
+
+
+_GOVERNANCE_PROJECT_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$')
+_GOVERNANCE_PROJECT_PATH_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_./-]{0,159}$')
+_GOVERNANCE_PROJECT_KINDS = {
+    'project',
+    'governance',
+    'dashboard',
+    'terminal',
+    'workflow',
+    'compat',
+}
+
+
+def _clean_governance_text(value: Optional[str], default: str = '') -> str:
+    text = (value or default).strip()
+    return re.sub(r'\s+', ' ', text)
+
+
+def _normalize_governance_project(payload: GovernanceProjectCreate) -> tuple[Optional[dict], Optional[str]]:
+    project_id = payload.id.strip()
+    if not _GOVERNANCE_PROJECT_ID_RE.fullmatch(project_id):
+        return None, 'invalid project id'
+    rel_path = (payload.path or project_id).strip()
+    if not _GOVERNANCE_PROJECT_PATH_RE.fullmatch(rel_path) or '//' in rel_path:
+        return None, 'invalid project path'
+    target_dir = (ZONE_ROOT / rel_path).resolve()
+    try:
+        target_dir.relative_to(ZONE_ROOT)
+    except ValueError:
+        return None, 'project path escapes zone root'
+    if any(part in ('', '.', '..') for part in Path(rel_path).parts):
+        return None, 'invalid project path segments'
+    kind = payload.kind.strip().lower() or 'project'
+    if kind not in _GOVERNANCE_PROJECT_KINDS:
+        return None, 'invalid project kind'
+    title = _clean_governance_text(payload.title, project_id)
+    summary = _clean_governance_text(payload.summary, 'No summary yet.')
+    return {
+        'id': project_id,
+        'path': rel_path,
+        'title': title,
+        'kind': kind,
+        'summary': summary,
+        'wiki': bool(payload.wiki),
+        'claude_compat': bool(payload.claude_compat),
+    }, None
+
+
+def _governance_registry_value(value) -> str:
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    text = re.sub(r'[\r\n]+', ' ', str(value)).strip()
+    return text
+
+
+def _append_governance_project(project: dict) -> None:
+    PROJECTS_REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if PROJECTS_REGISTRY_PATH.exists():
+        text = PROJECTS_REGISTRY_PATH.read_text(encoding='utf-8')
+    else:
+        text = 'projects:\n'
+    if not text.strip():
+        text = 'projects:\n'
+    if 'projects:' not in text:
+        raise ValueError('projects.yaml does not contain projects: root')
+
+    block = [
+        f"  - id: {_governance_registry_value(project['id'])}",
+        f"    path: {_governance_registry_value(project['path'])}",
+        f"    title: {_governance_registry_value(project['title'])}",
+        f"    kind: {_governance_registry_value(project['kind'])}",
+        f"    summary: {_governance_registry_value(project['summary'])}",
+        f"    wiki: {_governance_registry_value(project['wiki'])}",
+        f"    claude_compat: {_governance_registry_value(project['claude_compat'])}",
+    ]
+    if not text.endswith('\n'):
+        text += '\n'
+    tmp_path = PROJECTS_REGISTRY_PATH.with_name(PROJECTS_REGISTRY_PATH.name + '.tmp')
+    tmp_path.write_text(text + '\n'.join(block) + '\n', encoding='utf-8')
+    tmp_path.replace(PROJECTS_REGISTRY_PATH)
+
+
+@app.get("/api/governance/summary")
+def api_governance_summary():
+    registry_error = None
+    try:
+        projects = _parse_governance_projects(PROJECTS_REGISTRY_PATH)
+    except Exception as e:
+        projects = []
+        registry_error = str(e)
+
+    pages = _wiki_page_listing()
+    raw_snapshot_count = 0
+    if RAW_DIR.exists():
+        raw_snapshot_count = sum(1 for p in RAW_DIR.rglob('*') if p.is_file())
+    return {
+        'paths': {
+            'zone_root': _path_meta(ZONE_ROOT),
+            'governance_repo': _path_meta(GOVERNANCE_REPO_DIR),
+            'projects_registry': _path_meta(PROJECTS_REGISTRY_PATH),
+            'wiki_dir': _path_meta(WIKI_DIR),
+            'raw_dir': _path_meta(RAW_DIR),
+            'audit_dir': _path_meta(AUDIT_DIR),
+        },
+        'scripts': {
+            'project_sync': _path_meta(PROJECT_SYNC_SCRIPT),
+            'wiki_check': _path_meta(WIKI_CHECK_SCRIPT),
+            'zone_audit': _path_meta(ZONE_AUDIT_SCRIPT),
+            'zone_track': _path_meta(ZONE_TRACK_SCRIPT),
+        },
+        'projects': projects,
+        'project_count': len(projects),
+        'registry_error': registry_error,
+        'wiki': {
+            'index': _path_meta(WIKI_DIR / 'index.md'),
+            'log': _path_meta(WIKI_DIR / 'log.md'),
+            'page_count': len(pages),
+            'pages': pages,
+        },
+        'raw_snapshot_count': raw_snapshot_count,
+        'audit': _read_governance_audit_latest(),
+    }
+
+
+@app.get("/api/governance/wiki/index")
+def api_governance_wiki_index():
+    path = WIKI_DIR / 'index.md'
+    if not path.exists():
+        return JSONResponse({'error': 'not found'}, status_code=404)
+    return _read_governance_markdown(path)
+
+
+@app.get("/api/governance/wiki/page")
+def api_governance_wiki_page(path: str = Query(..., min_length=1, max_length=200)):
+    page = _safe_wiki_markdown_path(path)
+    if page is None:
+        return JSONResponse({'error': 'bad path'}, status_code=400)
+    if not page.exists():
+        return JSONResponse({'error': 'not found'}, status_code=404)
+    return _read_governance_markdown(page)
+
+
+@app.get("/api/governance/audit/latest")
+def api_governance_audit_latest():
+    data = _read_governance_audit_latest(include_text=True)
+    if not data['latest']['exists']:
+        return JSONResponse({'error': 'not found'}, status_code=404)
+    return data
+
+
+@app.post("/api/governance/check")
+def api_governance_check(request: Request):
+    result = _run_governance_script(WIKI_CHECK_SCRIPT)
+    _audit(
+        'governance_check',
+        request,
+        status='ok' if result['ok'] else 'error',
+        detail={'returncode': result['returncode'], 'duration_ms': result['duration_ms']},
+    )
+    return result
+
+
+@app.post("/api/governance/sync")
+def api_governance_sync(request: Request):
+    result = _run_governance_script(PROJECT_SYNC_SCRIPT)
+    _audit(
+        'governance_sync',
+        request,
+        status='ok' if result['ok'] else 'error',
+        detail={'returncode': result['returncode'], 'duration_ms': result['duration_ms']},
+    )
+    return result
+
+
+@app.post("/api/governance/track")
+def api_governance_track(request: Request):
+    result = _run_governance_script(ZONE_TRACK_SCRIPT, timeout_s=180)
+    result['audit'] = _read_governance_audit_latest()
+    _audit(
+        'governance_track',
+        request,
+        status='ok' if result['ok'] else 'error',
+        detail={
+            'returncode': result['returncode'],
+            'duration_ms': result['duration_ms'],
+            'audit_mtime': result['audit']['latest'].get('mtime'),
+        },
+    )
+    return result
+
+
+@app.post("/api/governance/projects")
+def api_governance_project_create(payload: GovernanceProjectCreate, request: Request):
+    project, error = _normalize_governance_project(payload)
+    if error or project is None:
+        _audit('governance_project_add', request, status='error', detail={'error': error})
+        return JSONResponse({'error': error or 'invalid project'}, status_code=400)
+
+    try:
+        with _GOVERNANCE_REGISTRY_LOCK:
+            projects = _parse_governance_projects(PROJECTS_REGISTRY_PATH)
+            if any(str(p.get('id')) == project['id'] for p in projects):
+                return JSONResponse({'error': 'project id already exists'}, status_code=409)
+            if any(str(p.get('path', p.get('id'))) == project['path'] for p in projects):
+                return JSONResponse({'error': 'project path already exists'}, status_code=409)
+            _append_governance_project(project)
+    except Exception as e:
+        _audit('governance_project_add', request, status='error', detail={'id': project['id'], 'error': str(e)[:200]})
+        logger.exception("Governance project registry update failed")
+        return JSONResponse({'error': 'registry update failed', 'detail': 'check server logs'}, status_code=500)
+
+    sync_result = _run_governance_script(PROJECT_SYNC_SCRIPT) if payload.sync_after else None
+    _audit(
+        'governance_project_add',
+        request,
+        status='ok' if (sync_result is None or sync_result.get('ok')) else 'error',
+        detail={
+            'id': project['id'],
+            'path': project['path'],
+            'sync_after': payload.sync_after,
+            'sync_returncode': sync_result.get('returncode') if sync_result else None,
+        },
+    )
+    return {'ok': True, 'project': project, 'sync': sync_result}
+
+
 def _db_storage_breakdown() -> dict:
     try:
         size = DB_PATH.stat().st_size
@@ -3202,16 +3716,19 @@ def _run_retention(older_than_days: int) -> dict:
     cutoff = (datetime.now(_tz.utc) - timedelta(days=older_than_days)).strftime(
         '%Y-%m-%dT%H:%M:%SZ')
     with write_db() as db:
-        old = db.execute(
-            'SELECT id FROM sessions WHERE updated_at < ?', (cutoff,)
-        ).fetchall()
+        old = []
+        if _legacy_sessions_table_exists(db):
+            old = db.execute(
+                'SELECT id FROM sessions WHERE updated_at < ?', (cutoff,)
+            ).fetchall()
         sids = [r['id'] for r in old]
         msg_del = sess_del = 0
         if sids:
             ph = ','.join(['?'] * len(sids))
-            msg_del = db.execute(
-                f'DELETE FROM messages WHERE session_id IN ({ph})', sids
-            ).rowcount
+            if _legacy_messages_table_exists(db):
+                msg_del = db.execute(
+                    f'DELETE FROM messages WHERE session_id IN ({ph})', sids
+                ).rowcount
             sess_del = db.execute(
                 f'DELETE FROM sessions WHERE id IN ({ph})', sids
             ).rowcount
@@ -3298,9 +3815,11 @@ def api_retention(
     if not confirm:
         # Preview only — show what WOULD be deleted
         with read_db() as db:
-            legacy_cnt = db.execute(
-                'SELECT COUNT(*) FROM sessions WHERE updated_at < ?', (cutoff,)
-            ).fetchone()[0]
+            legacy_cnt = 0
+            if _legacy_sessions_table_exists(db):
+                legacy_cnt = db.execute(
+                    'SELECT COUNT(*) FROM sessions WHERE updated_at < ?', (cutoff,)
+                ).fetchone()[0]
             codex_cnt = db.execute(
                 'SELECT COUNT(*) FROM codex_sessions WHERE updated_at < ?', (cutoff,)
             ).fetchone()[0]
@@ -3367,7 +3886,7 @@ def api_audit(
             try:
                 d['detail'] = json.loads(d['detail'])
             except Exception:
-                pass
+                logger.debug("admin audit detail is not JSON", exc_info=True)
         out.append(d)
     return {'entries': out, 'count': len(out)}
 
@@ -3452,7 +3971,7 @@ def _sched_next_run(cfg: dict) -> Optional[str]:
                 nxt = now
             return nxt.strftime('%Y-%m-%dT%H:%M:%SZ')
         except Exception:
-            pass
+            logger.debug("failed to parse retention last_run_at", exc_info=True)
     return now.strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
@@ -3554,13 +4073,13 @@ def api_admin_status():
         try:
             w_queue = watcher._event_queue.qsize()
         except Exception:
-            pass
+            logger.debug("watcher queue size read failed", exc_info=True)
     w_files_tracked = 0
     if watcher and hasattr(watcher, '_file_mtimes'):
         try:
             w_files_tracked = len(watcher._file_mtimes)
         except Exception:
-            pass
+            logger.debug("watcher tracked file count read failed", exc_info=True)
 
     uptime_sec = int(time.time() - _APP_START_TS)
     return {
@@ -3612,5 +4131,6 @@ def api_metrics():
 
 if __name__ == '__main__':
     import uvicorn
-    port = int(os.environ.get('PORT', 8765))
-    uvicorn.run('main:app', host='0.0.0.0', port=port, reload=False, log_level='info')
+    port = int(os.environ.get('PORT', 8617))
+    host = os.environ.get('HOST', '127.0.0.1')
+    uvicorn.run('main:app', host=host, port=port, reload=False, log_level='info')

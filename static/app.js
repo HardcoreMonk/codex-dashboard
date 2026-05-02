@@ -67,9 +67,17 @@ const bus = {
 
 // ─── Event delegation ────────────────────────────────────────────────
 // Central click handler for data-action attributes. New code should prefer
-// <button data-action="fnName"> over onclick="fnName()".
+// <button data-action="fnName"> over inline DOM handler attributes.
 // The delegator calls window[action]() if it exists.
 document.addEventListener('click', (e) => {
+  if (e.target instanceof HTMLElement && e.target.dataset.backdropAction) {
+    const fn = window[e.target.dataset.backdropAction];
+    if (typeof fn === 'function') {
+      e.preventDefault();
+      fn();
+    }
+    return;
+  }
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const action = el.dataset.action;
@@ -96,6 +104,47 @@ document.addEventListener('click', (e) => {
   if (el.dataset.passEl !== undefined) args.unshift(el);
   fn(...args);
 });
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('[data-action][role="button"]');
+  if (!el) return;
+  e.preventDefault();
+  el.click();
+});
+
+function deleteSelectedPreset() {
+  const select = document.getElementById('presetSelect');
+  if (select?.value) deletePreset(select.value);
+}
+
+function removeClosestFixed(el) {
+  el.closest('.fixed')?.remove();
+}
+
+function closeNodeRegister() {
+  document.getElementById('nodeRegisterForm')?.classList.add('hidden');
+}
+
+function requestNotificationPermission() {
+  if (!('Notification' in window)) {
+    showToast('브라우저 알림을 지원하지 않습니다', { type: 'warning' });
+    return;
+  }
+  Notification.requestPermission().then((permission) => {
+    showToast('알림: ' + permission, { type: 'info' });
+  });
+}
+
+function resetDashboardPrefs() {
+  if (!confirm('모든 환경설정을 초기화합니다.')) return;
+  localStorage.removeItem(PREFS_KEY);
+  location.reload();
+}
+
+function hideKbdHelp() {
+  document.getElementById('kbdHelp')?.classList.add('hidden');
+}
 
 // ─── State accessor functions ────────────────────────────────────────
 // Cross-file code MUST use these instead of touching state.* directly.
@@ -160,13 +209,13 @@ function sortArrowHtml(view, key) {
 function sortThHtml(view, col, label, align = 'text-left', extraCls = '') {
   const s = sortState[view];
   const ariaSort = s.key === col ? (s.order === 'asc' ? 'ascending' : 'descending') : 'none';
-  return `<th aria-sort="${ariaSort}" class="${align} ${extraCls} px-3 py-2.5 font-bold cursor-pointer select-none hover:text-white/70 spring" onclick="toggleSort('${view}','${col}')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSort('${view}','${col}')" tabindex="0" role="button">${label}${sortArrowHtml(view, col)}</th>`;
+  return `<th aria-sort="${ariaSort}" class="${align} ${extraCls} px-3 py-2.5 font-bold cursor-pointer select-none hover:text-white/70 spring" data-action="toggleSort" data-arg0="${esc(view)}" data-arg1="${esc(col)}" tabindex="0" role="button">${label}${sortArrowHtml(view, col)}</th>`;
 }
 function sortPillHtml(view, col, label, size = 'text-[10px]') {
   const s = sortState[view];
   const active = s.key === col;
   const arr = active ? (s.order === 'asc' ? ' ↑' : ' ↓') : '';
-  return `<button onclick="toggleSort('${view}','${col}')" class="px-3 py-1 rounded-full border spring ${size} font-semibold ${active ? 'bg-accent/15 text-accent border-accent/30' : 'text-white/45 border-white/[0.07] hover:text-white/70'}">${label}${arr}</button>`;
+  return `<button data-action="toggleSort" data-arg0="${esc(view)}" data-arg1="${esc(col)}" class="px-3 py-1 rounded-full border spring ${size} font-semibold ${active ? 'bg-accent/15 text-accent border-accent/30' : 'text-white/45 border-white/[0.07] hover:text-white/70'}">${label}${arr}</button>`;
 }
 
 // ─── Navigation + URL hash routing ─────────────────────────────────────
@@ -200,6 +249,7 @@ function loadAnalysisDashboard() {
 function loadAdminDashboard() {
   loadDbSize();
   renderNodeList();
+  loadGovernanceStatus();
   loadAdminStatus();
   loadSchedule();
   loadAuditLog();
@@ -649,36 +699,46 @@ window.selectSearchMessage = selectSearchMessage;
 const FETCH_MAX_RETRIES = 3;
 const FETCH_TIMEOUT_MS = 15000;
 const _inflightRequests = new Map();  // url → Promise
-async function safeFetch(url) {
-  // Deduplicate: if an identical GET is already in-flight, piggyback on it
-  const existing = _inflightRequests.get(url);
-  if (existing) return existing;
-  const promise = _safeFetchInner(url).finally(() => {
-    _inflightRequests.delete(url);
+async function safeFetch(url, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const dedupeKey = method === 'GET' && Object.keys(options).length === 0 ? url : null;
+  if (dedupeKey) {
+    const existing = _inflightRequests.get(dedupeKey);
+    if (existing) return existing;
+  }
+  const promise = _safeFetchInner(url, options).finally(() => {
+    if (dedupeKey) _inflightRequests.delete(dedupeKey);
   });
-  _inflightRequests.set(url, promise);
+  if (dedupeKey) _inflightRequests.set(dedupeKey, promise);
   return promise;
 }
-async function _safeFetchInner(url) {
+async function _safeFetchInner(url, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const maxAttempts = method === 'GET' ? FETCH_MAX_RETRIES : 1;
   let lastErr;
-  for (let attempt = 0; attempt < FETCH_MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let timer = null;
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-      const r = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (r.ok) return r.json();
+      timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+      const r = await fetch(url, { ...options, signal: ctrl.signal });
+      if (r.ok) {
+        const text = await r.text();
+        return text ? JSON.parse(text) : {};
+      }
       // 5xx → retry with backoff; 4xx → fail immediately
-      if (r.status < 500) throw new Error(`HTTP ${r.status}`);
+      if (r.status < 500 || method !== 'GET') throw new Error(`HTTP ${r.status}`);
       lastErr = new Error(`HTTP ${r.status}`);
     } catch (e) {
       lastErr = e;
       if (e.name === 'AbortError') lastErr = new Error('요청 시간 초과');
       // Don't retry on 4xx (thrown above) or non-network errors
       if (lastErr.message.startsWith('HTTP 4')) throw lastErr;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
     // Exponential backoff: 500ms, 1s, 2s
-    if (attempt < FETCH_MAX_RETRIES - 1) {
+    if (attempt < maxAttempts - 1) {
       await new Promise(ok => setTimeout(ok, 500 * Math.pow(2, attempt)));
     }
   }
@@ -872,16 +932,16 @@ const _CMDK_CACHE_TTL = 30000; // 30 seconds
 
 function _cmdkStaticItems() {
   return [
-    { label: '검색',      hint: '메시지 검색', icon: 'solar:magnifer-linear', action: () => openLegacySubview('search') },
-    { label: '개요',      hint: '대시보드', icon: 'solar:chart-square-linear', action: () => showView('overview') },
-    { label: '비용',      hint: '토큰/비용 차트', icon: 'solar:graph-up-linear', action: () => openLegacySubview('cost') },
-    { label: '세션',      hint: '전체 세션 목록', icon: 'solar:list-check-linear', action: () => openLegacySubview('sessions') },
-    { label: '대화',      hint: '대화 뷰어', icon: 'solar:chat-round-line-linear', action: () => openLegacySubview('conversations') },
-    { label: '모델',      hint: '모델 분석', icon: 'solar:cpu-bolt-linear', action: () => openLegacySubview('models') },
-    { label: '프로젝트',   hint: '프로젝트 목록', icon: 'solar:folder-open-linear', action: () => openLegacySubview('projects') },
-    { label: 'Subagent',  hint: '히트맵 + 종료 매트릭스', icon: 'solar:widget-2-linear', action: () => openLegacySubview('subagents') },
-    { label: '타임라인',  hint: '작업 Gantt 차트', icon: 'solar:calendar-linear', action: () => openLegacySubview('timeline') },
-    { label: '관리',      hint: 'CSV / 백업 / 보존', icon: 'solar:database-linear', action: () => openLegacySubview('export') },
+    { label: '메시지 검색', hint: '작업 탐색 · 검색', icon: 'solar:magnifer-linear', action: () => openLegacySubview('search') },
+    { label: '전체 현황', hint: '오늘·누적 대시보드', icon: 'solar:chart-square-linear', action: () => showView('overview') },
+    { label: '비용 분석', hint: '사용 분석 · 토큰/비용 차트', icon: 'solar:graph-up-linear', action: () => openLegacySubview('cost') },
+    { label: '세션 목록', hint: '작업 탐색 · 전체 세션', icon: 'solar:list-check-linear', action: () => openLegacySubview('sessions') },
+    { label: '대화 뷰어', hint: '작업 탐색 · 메시지 흐름', icon: 'solar:chat-round-line-linear', action: () => openLegacySubview('conversations') },
+    { label: '모델 분석', hint: '사용 분석 · 모델별 사용량', icon: 'solar:cpu-bolt-linear', action: () => openLegacySubview('models') },
+    { label: '프로젝트 목록', hint: '사용 분석 · 프로젝트별 흐름', icon: 'solar:folder-open-linear', action: () => openLegacySubview('projects') },
+    { label: 'Subagent 분석', hint: '사용 분석 · 히트맵/종료 매트릭스', icon: 'solar:widget-2-linear', action: () => openLegacySubview('subagents') },
+    { label: '타임라인 분석', hint: '사용 분석 · 작업 Gantt 차트', icon: 'solar:calendar-linear', action: () => openLegacySubview('timeline') },
+    { label: '운영 관리', hint: '백업·Wiki·노드·보존', icon: 'solar:database-linear', action: () => openLegacySubview('export') },
     { label: '예산 설정',  hint: '플랜/예산 편집', icon: 'solar:settings-linear', action: () => openPlanSettings() },
     { label: '다크/라이트 전환', hint: '테마 토글', icon: 'solar:sun-linear', action: () => toggleTheme() },
     { label: '키보드 단축키', hint: '도움말 표시', icon: 'solar:keyboard-linear', action: () => showKbdHelp() },
@@ -1014,12 +1074,12 @@ document.addEventListener('keydown', (e) => {
 
 // ─── Auth: logout + session check ────────────────────────────────────
 async function logoutDashboard() {
-  await fetch('/api/auth/logout', { method: 'POST' });
+  await safeFetch('/api/auth/logout', { method: 'POST' });
   window.location.href = '/login';
 }
 async function checkAuth() {
   try {
-    const d = await fetch('/api/auth/me').then(r => r.json());
+    const d = await safeFetch('/api/auth/me');
     if (d.auth_required && !d.authenticated) {
       window.location.href = '/login';
       return;
@@ -1551,7 +1611,10 @@ function setWsStatus(cls, label) {
   }
   d.className = base + cls2;
   d.title = cls === 'connected' ? '실시간 연결됨 (클릭해서 재연결)' : '클릭해서 즉시 재연결';
-  d.onclick = forceReconnectWs;
+  if (!d.dataset.reconnectBound) {
+    d.addEventListener('click', forceReconnectWs);
+    d.dataset.reconnectBound = '1';
+  }
   const lbl = document.getElementById('wsLabel');
   if (lbl) {
     lbl.textContent = label;
@@ -1582,7 +1645,7 @@ function renderConvSortBar(){
     const s=sortState.conversations;
     const active=s.key===k;
     const arr=active?(s.order==='asc'?' ↑':' ↓'):'';
-    return `<button onclick="toggleSort('conversations','${k}')" class="px-2.5 py-1 rounded-full border spring text-[10px] font-bold ${active?'bg-accent/15 text-accent border-accent/30':'text-white/55 border-white/[0.08] hover:text-white/80'}">${l}${arr}</button>`;
+    return `<button data-action="toggleSort" data-arg0="conversations" data-arg1="${esc(k)}" class="px-2.5 py-1 rounded-full border spring text-[10px] font-bold ${active?'bg-accent/15 text-accent border-accent/30':'text-white/55 border-white/[0.08] hover:text-white/80'}">${l}${arr}</button>`;
   }).join('');
 }
 function switchConvSource(src) {
@@ -1635,7 +1698,8 @@ async function loadConvList(){
           <span>${relTime(s.updated_at)}</span>
         </div>
         ${tagRow}`;
-      div.onclick=()=>openConversation(s.id,s,div);b.appendChild(div);
+      div.addEventListener('click', () => openConversation(s.id, s, div));
+      b.appendChild(div);
     });
   }catch(e){reportError('loadConvList',e);}
 }
@@ -1797,7 +1861,7 @@ async function openConversation(sid,session,listItem){
       ? `<span class="text-purple-300/60 font-mono">${esc(session.parent_tool_use_id)}</span>`
       : '<span class="text-white/25">(not linked)</span>';
     const parent = session.parent_session_id
-      ? `<button onclick="openParentFromSubagent('${esc(session.parent_session_id)}')" class="text-accent/80 hover:text-accent underline font-mono">${esc(session.parent_session_id.slice(0,8))}</button>`
+      ? `<button data-action="openParentFromSubagent" data-arg="${esc(session.parent_session_id)}" class="text-accent/80 hover:text-accent underline font-mono">${esc(session.parent_session_id.slice(0,8))}</button>`
       : '—';
     const promptExcerpt = session.task_prompt
       ? `<details class="mt-2 bg-purple-500/[0.04] ring-1 ring-purple-500/15 rounded-lg">
@@ -1849,7 +1913,7 @@ async function openConversation(sid,session,listItem){
     const btn = document.createElement('button');
     btn.className = 'mt-2 px-3 py-1 rounded-full bg-purple-500/10 text-purple-300/85 border border-purple-500/25 text-[10px] font-bold spring hover:scale-[1.02]';
     btn.textContent = '🔗 디스패치 체인 보기';
-    btn.onclick = () => loadSessionChain(sid);
+    btn.addEventListener('click', () => loadSessionChain(sid));
     slot.appendChild(btn);
   }, 60);
   const c=document.getElementById('convMessages');
@@ -1979,7 +2043,7 @@ async function loadSessionChain(sid) {
     // overlay rather than a fixed modal — chain is read-only).
     const ov = document.createElement('div');
     ov.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4';
-    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
     const lines = nodes.map(n => {
       const indent = '  '.repeat(n.level);
       const arrow = n.level === 0 ? '◉' : '└▶';
@@ -1997,7 +2061,7 @@ async function loadSessionChain(sid) {
       <div class="bg-[#0f0f0f] ring-1 ring-purple-500/25 rounded-2xl w-[700px] max-w-[94vw] max-h-[80vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in">
         <div class="px-5 py-3 border-b border-purple-500/20 flex items-center justify-between">
           <span class="text-sm font-bold text-purple-200">디스패치 체인 (${nodes.length} 노드)</span>
-          <button onclick="this.closest('.fixed').remove()" class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
+          <button data-action="removeClosestFixed" data-pass-el class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
         </div>
         <div class="p-4">${lines}</div>
       </div>`;
@@ -2114,7 +2178,7 @@ function renderSubagentCard(block) {
     : '';
   const stopBadge = linked ? stopReasonBadge(sub.final_stop_reason) : '';
   const clickAttr = linked
-    ? `onclick="openSubagentFromDescription('${esc(description).replace(/'/g,"\\'")}')"`
+    ? `data-action="openSubagentFromDescription" data-arg="${esc(description)}" role="button" tabindex="0"`
     : '';
   const cursor = linked ? 'cursor-pointer hover:bg-purple-500/15' : '';
   return `<div class="mt-2 ${bg} rounded-xl px-3 py-2 ${cursor} spring" ${clickAttr}>
@@ -2226,14 +2290,14 @@ function renderMarkdown(raw) {
 
 function renderBlock(block){if(!block||typeof block!=='object')return esc(String(block||''));const t=block.type||'';
   if(t==='text')return `<div>${renderMarkdown(block.text||'')}</div>`;
-  if(t==='thinking'){const th=block.thinking||'';if(!th)return `<div class="text-[10px] text-white/30 italic">[Extended Thinking]</div>`;const id='th-'+Math.random().toString(36).slice(2);return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-cyan-400/65 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> Extended Thinking</div><div class="tool-body p-3 text-[11px] text-white/55 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(th)}</div></div>`;}
+  if(t==='thinking'){const th=block.thinking||'';if(!th)return `<div class="text-[10px] text-white/30 italic">[Extended Thinking]</div>`;const id='th-'+Math.random().toString(36).slice(2);return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-cyan-400/65 flex items-center gap-1.5" data-action="toggleTool" data-arg="${id}" role="button" tabindex="0"><span class="arr">▶</span> Extended Thinking</div><div class="tool-body p-3 text-[11px] text-white/55 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(th)}</div></div>`;}
   if(t==='tool_use'){
     const name = block.name || '';
     if (name === 'Agent' || name === 'Task') return renderSubagentCard(block);
     const id='tu-'+Math.random().toString(36).slice(2);
-    return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-purple-400/65 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> ${esc(name||'tool')}</div><div class="tool-body p-3 text-[11px] text-white/55 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(JSON.stringify(block.input||{},null,2))}</div></div>`;
+    return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-purple-400/65 flex items-center gap-1.5" data-action="toggleTool" data-arg="${id}" role="button" tabindex="0"><span class="arr">▶</span> ${esc(name||'tool')}</div><div class="tool-body p-3 text-[11px] text-white/55 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(JSON.stringify(block.input||{},null,2))}</div></div>`;
   }
-  if(t==='tool_result'){const id='tr-'+Math.random().toString(36).slice(2);let rc='';if(Array.isArray(block.content))rc=block.content.map(c=>c.text||'').join('\n');else rc=String(block.content||'');return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-emerald-400/65 flex items-center gap-1.5" onclick="toggleTool('${id}')"><span class="arr">▶</span> Tool Result</div><div class="tool-body p-3 text-[11px] text-white/55 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(rc.slice(0,5000))}</div></div>`;}
+  if(t==='tool_result'){const id='tr-'+Math.random().toString(36).slice(2);let rc='';if(Array.isArray(block.content))rc=block.content.map(c=>c.text||'').join('\n');else rc=String(block.content||'');return `<div class="mt-2 bg-white/[0.03] ring-1 ring-white/[0.05] rounded-xl overflow-hidden"><div class="tool-hdr px-3 py-1.5 text-[11px] font-semibold text-emerald-400/65 flex items-center gap-1.5" data-action="toggleTool" data-arg="${id}" role="button" tabindex="0"><span class="arr">▶</span> Tool Result</div><div class="tool-body p-3 text-[11px] text-white/55 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto" id="${id}">${esc(rc.slice(0,5000))}</div></div>`;}
   return `<div class="text-[10px] text-white/20">[${esc(t)}]</div>`;
 }
 
@@ -2318,7 +2382,7 @@ async function loadProjects(){
     (data.projects||[]).forEach(p=>{
       const tr=document.createElement('tr');
       tr.className='border-b border-white/[0.03] hover:bg-white/[0.05] cursor-pointer spring';
-      tr.onclick=()=>showProjectDetail(p.project_name,p.project_path);
+      tr.addEventListener('click', () => showProjectDetail(p.project_name, p.project_path));
       const pTagList = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
       const pTagRow = pTagList.length
         ? `<div class="mt-1 flex flex-wrap gap-1">${pTagList.map(t => `<span class="tag-badge">#${esc(t)}</span>`).join('')}</div>`
@@ -2355,7 +2419,7 @@ async function createBackup() {
   if (label) label.textContent = '백업 중…';
   showToast('백업 생성 중…', { type: 'info', duration: 2000 });
   try {
-    const r = await fetch('/api/admin/backup', { method: 'POST' }).then(r => r.json());
+    const r = await safeFetch('/api/admin/backup', { method: 'POST' });
     if (r.ok) {
       const mb = (r.size_bytes / 1048576).toFixed(1);
       if (label) label.textContent = `완료: ${mb} MB`;
@@ -2375,7 +2439,7 @@ async function runDbCompact() {
   if (label) label.textContent = 'DB 정리 중…';
   showToast('DB 정리 실행 중…', { type: 'info', duration: 2000 });
   try {
-    const r = await fetch('/api/admin/db-compact', { method: 'POST' }).then(r => r.json());
+    const r = await safeFetch('/api/admin/db-compact', { method: 'POST' });
     if (r.error) throw new Error(r.error);
     const reclaimed = _fmtBytes(r.reclaimed_bytes || 0);
     if (label) label.textContent = `완료: ${reclaimed} 회수`;
@@ -2406,10 +2470,10 @@ async function runRetention() {
       message: `${days}일보다 오래된 ${fmtN(pv.sessions_to_delete)}개 세션이 영구 삭제됩니다. 복구할 수 없습니다.`,
       onConfirm: async () => {
         try {
-          const r = await fetch(
+          const r = await safeFetch(
             `/api/admin/retention?older_than_days=${days}&confirm=true`,
             { method: 'DELETE' }
-          ).then(r => r.json());
+          );
           if (el) el.textContent = `삭제: ${r.deleted_sessions}개 세션, ${r.deleted_messages}건 메시지`;
           showToast(
             `보존 삭제 완료 — ${fmtN(r.deleted_sessions)}세션 / ${fmtN(r.deleted_messages)}메시지`,
@@ -2589,6 +2653,7 @@ async function loadAuditLog() {
       const actionCls = e.action === 'retention' || e.action === 'retention_scheduled' ? 'text-amber-400/80 font-bold'
                       : e.action === 'backup' ? 'text-emerald-400/80 font-bold'
                       : e.action?.startsWith('node_') ? 'text-cyan-400/80 font-bold'
+                      : e.action?.startsWith('governance_') ? 'text-accent font-bold'
                       : 'text-white/70 font-bold';
       tr.appendChild(mk(e.action || '', 'px-2 py-1 ' + actionCls));
       tr.appendChild(mk(e.actor_ip || '', 'px-2 py-1 text-white/30 tabular-nums'));
@@ -2612,6 +2677,263 @@ async function loadAuditLog() {
   }
 }
 function refreshAudit() { loadAuditLog(); }
+
+// ─── Governance / Wiki ─────────────────────────────────────────────────────
+function _governanceTime(ts) {
+  return ts ? ts.replace('T', ' ').replace('Z', ' UTC') : '—';
+}
+
+function _governanceFileState(meta) {
+  return meta?.exists ? `${_fmtBytes(meta.size_bytes || 0)} · ${_governanceTime(meta.mtime)}` : '없음';
+}
+
+function _governanceMetric(audit, key, fallback = 0) {
+  const value = audit?.metrics?.[key];
+  return value === undefined || value === null || value === '' ? fallback : value;
+}
+
+function _governanceMetricInt(audit, key) {
+  const value = Number(_governanceMetric(audit, key, 0));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function _governanceMetricTone(value, good = 'text-emerald-300/80', bad = 'text-amber-300/85') {
+  return Number(value || 0) === 0 ? good : bad;
+}
+
+async function loadGovernanceStatus() {
+  const summary = document.getElementById('governanceSummary');
+  const index = document.getElementById('governanceWikiIndex');
+  const audit = document.getElementById('governanceAuditLatest');
+  if (!summary && !index && !audit) return;
+  try {
+    const data = await safeFetch('/api/governance/summary');
+    renderGovernanceSummary(data);
+    const [indexPage, auditPage] = await Promise.allSettled([
+      safeFetch('/api/governance/wiki/index'),
+      safeFetch('/api/governance/audit/latest'),
+    ]);
+    if (indexPage.status === 'fulfilled') renderGovernanceWikiIndex(indexPage.value);
+    else if (index) index.innerHTML = '<div class="text-rose-300/70 text-xs py-3">위키 인덱스 로드 실패</div>';
+    if (auditPage.status === 'fulfilled') renderGovernanceAuditLatest(auditPage.value);
+    else if (audit) audit.innerHTML = '<div class="text-rose-300/70 text-xs py-3">감사 리포트 로드 실패</div>';
+    reportSuccess('loadGovernanceStatus');
+  } catch (e) {
+    if (summary) renderError(summary, e, loadGovernanceStatus);
+    if (index) index.textContent = '위키 인덱스 로드 실패';
+    if (audit) audit.textContent = '감사 리포트 로드 실패';
+    reportError('loadGovernanceStatus', e);
+  }
+}
+
+function renderGovernanceSummary(data) {
+  const el = document.getElementById('governanceSummary');
+  if (!el) return;
+  const projects = data.projects || [];
+  const audit = data.audit || {};
+  const dirty = _governanceMetricInt(audit, 'dirty_git_worktrees');
+  const rawDrift = _governanceMetricInt(audit, 'raw_snapshot_drift');
+  const secretHits = _governanceMetricInt(audit, 'high_signal_secret_hits');
+  const unregistered = _governanceMetricInt(audit, 'unregistered_git_worktrees')
+    + _governanceMetricInt(audit, 'unregistered_project_candidates');
+  const projectRows = projects.slice(0, 8).map((p) => `
+    <div class="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg bg-white/[0.025]">
+      <div class="min-w-0">
+        <div class="text-white/75 font-semibold truncate">${esc(p.id || p.title || '—')}</div>
+        <div class="text-white/25 text-[9px] truncate">${esc(p.path || p.id || '')}</div>
+      </div>
+      <div class="text-[9px] text-white/35 whitespace-nowrap">${esc(p.kind || 'project')}</div>
+    </div>`).join('');
+  const err = data.registry_error
+    ? `<div class="mt-2 text-[10px] text-rose-300/80">${esc(data.registry_error)}</div>`
+    : '';
+  el.innerHTML = `
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div class="bg-white/[0.03] rounded-lg p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">프로젝트</div>
+        <div class="text-sm font-bold text-accent tabular-nums">${fmtN(data.project_count || 0)}</div>
+      </div>
+      <div class="bg-white/[0.03] rounded-lg p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Wiki</div>
+        <div class="text-sm font-bold text-cyan-300/80 tabular-nums">${fmtN(data.wiki?.page_count || 0)}</div>
+      </div>
+      <div class="bg-white/[0.03] rounded-lg p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Raw</div>
+        <div class="text-sm font-bold text-emerald-300/80 tabular-nums">${fmtN(data.raw_snapshot_count || 0)}</div>
+      </div>
+      <div class="bg-white/[0.03] rounded-lg p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Index</div>
+        <div class="text-[10px] font-semibold text-white/65 truncate">${esc(_governanceFileState(data.wiki?.index))}</div>
+      </div>
+    </div>
+    <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div class="bg-white/[0.03] rounded-lg p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Dirty</div>
+        <div class="text-sm font-bold ${_governanceMetricTone(dirty)} tabular-nums">${fmtN(dirty)}</div>
+      </div>
+      <div class="bg-white/[0.03] rounded-lg p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Drift</div>
+        <div class="text-sm font-bold ${_governanceMetricTone(rawDrift)} tabular-nums">${fmtN(rawDrift)}</div>
+      </div>
+      <div class="bg-white/[0.03] rounded-lg p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Secrets</div>
+        <div class="text-sm font-bold ${_governanceMetricTone(secretHits, 'text-emerald-300/80', 'text-rose-300/85')} tabular-nums">${fmtN(secretHits)}</div>
+      </div>
+      <div class="bg-white/[0.03] rounded-lg p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Untracked</div>
+        <div class="text-sm font-bold ${_governanceMetricTone(unregistered)} tabular-nums">${fmtN(unregistered)}</div>
+      </div>
+    </div>
+    <div class="mt-2 text-[10px] text-white/30 truncate">
+      latest audit: ${esc(_governanceFileState(audit.latest))} · track: ${esc(data.scripts?.zone_track?.exists ? 'ready' : 'missing')}
+    </div>
+    <div class="mt-3 space-y-1.5">${projectRows || '<div class="text-center text-white/15 text-xs py-3">등록된 프로젝트 없음</div>'}</div>
+    ${err}`;
+}
+
+function renderGovernanceWikiIndex(page) {
+  const el = document.getElementById('governanceWikiIndex');
+  if (!el) return;
+  const lines = String(page.text || '').split('\n').slice(0, 80).join('\n');
+  el.innerHTML = `
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <div class="text-[10px] text-white/30 truncate">${esc(page.relative_path || 'index.md')}</div>
+      <div class="text-[10px] text-white/25 whitespace-nowrap">${esc(_governanceFileState(page))}</div>
+    </div>
+    <pre class="max-h-80 overflow-auto rounded-lg bg-black/25 ring-1 ring-white/[0.05] p-3 text-[10px] leading-relaxed text-white/55 whitespace-pre-wrap">${esc(lines)}</pre>`;
+}
+
+function _governanceAuditDigest(page) {
+  const text = String(page?.text || '');
+  if (!text.trim()) return '감사 리포트 본문 없음';
+  const chunks = [];
+  const header = text.split('\n## Git Worktrees')[0]?.trim();
+  if (header) chunks.push(header);
+  const coverage = text.match(/\n## Registry Coverage\n([\s\S]*?)(?=\n## )/);
+  if (coverage) chunks.push(`## Registry Coverage\n${coverage[1].trim()}`);
+  const hygiene = text.match(/\n## Git Hygiene\n([\s\S]*?)(?=\n## )/);
+  if (hygiene) chunks.push(`## Git Hygiene\n${hygiene[1].trim()}`);
+  return (chunks.join('\n\n') || text).split('\n').slice(0, 90).join('\n');
+}
+
+function renderGovernanceAuditLatest(page) {
+  const el = document.getElementById('governanceAuditLatest');
+  if (!el) return;
+  const dirty = _governanceMetricInt(page, 'dirty_git_worktrees');
+  const rawDrift = _governanceMetricInt(page, 'raw_snapshot_drift');
+  const secretHits = _governanceMetricInt(page, 'high_signal_secret_hits');
+  const generated = _governanceMetric(page, 'generated', '—');
+  el.innerHTML = `
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <div class="text-[10px] text-white/30 truncate">${esc(page.relative_path || 'audit/zone-audit-latest.md')}</div>
+      <div class="text-[10px] text-white/25 whitespace-nowrap">${esc(_governanceFileState(page.latest))}</div>
+    </div>
+    <div class="grid grid-cols-3 gap-2 mb-2">
+      <div class="rounded-lg bg-white/[0.03] p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Dirty</div>
+        <div class="text-sm font-bold ${_governanceMetricTone(dirty)} tabular-nums">${fmtN(dirty)}</div>
+      </div>
+      <div class="rounded-lg bg-white/[0.03] p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Drift</div>
+        <div class="text-sm font-bold ${_governanceMetricTone(rawDrift)} tabular-nums">${fmtN(rawDrift)}</div>
+      </div>
+      <div class="rounded-lg bg-white/[0.03] p-2">
+        <div class="text-[9px] text-white/30 uppercase tracking-widest">Secrets</div>
+        <div class="text-sm font-bold ${_governanceMetricTone(secretHits, 'text-emerald-300/80', 'text-rose-300/85')} tabular-nums">${fmtN(secretHits)}</div>
+      </div>
+    </div>
+    <div class="mb-2 text-[10px] text-white/30 truncate">generated: ${esc(generated)}</div>
+    <pre class="max-h-80 overflow-auto rounded-lg bg-black/25 ring-1 ring-white/[0.05] p-3 text-[10px] leading-relaxed text-white/55 whitespace-pre-wrap">${esc(_governanceAuditDigest(page))}</pre>`;
+}
+
+function _governanceInput(id) {
+  return document.getElementById(id)?.value?.trim() || '';
+}
+
+function _resetGovernanceProjectForm() {
+  ['govProjectId', 'govProjectPath', 'govProjectTitle', 'govProjectSummary'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const kind = document.getElementById('govProjectKind');
+  if (kind) kind.value = 'project';
+  const wiki = document.getElementById('govProjectWiki');
+  if (wiki) wiki.checked = true;
+  const compat = document.getElementById('govProjectClaudeCompat');
+  if (compat) compat.checked = false;
+  const sync = document.getElementById('govProjectSyncAfter');
+  if (sync) sync.checked = true;
+}
+
+function _renderGovernanceResult(label, result) {
+  const el = document.getElementById('governanceActionResult');
+  if (!el) return;
+  const tone = result?.ok ? 'text-emerald-300/80' : 'text-rose-300/80';
+  el.innerHTML = `
+    <div class="${tone} font-semibold">${esc(label)} ${result?.ok ? '완료' : '실패'}${result?.returncode !== undefined ? ' · code ' + esc(result.returncode) : ''}</div>
+    ${result?.stdout ? `<pre class="mt-2 max-h-44 overflow-auto rounded-lg bg-black/25 p-2 text-[10px] text-white/55 whitespace-pre-wrap">${esc(result.stdout)}</pre>` : ''}
+    ${result?.stderr ? `<pre class="mt-2 max-h-44 overflow-auto rounded-lg bg-rose-500/10 p-2 text-[10px] text-rose-200/70 whitespace-pre-wrap">${esc(result.stderr)}</pre>` : ''}`;
+}
+
+async function addGovernanceProject() {
+  const payload = {
+    id: _governanceInput('govProjectId'),
+    path: _governanceInput('govProjectPath'),
+    title: _governanceInput('govProjectTitle'),
+    kind: _governanceInput('govProjectKind') || 'project',
+    summary: _governanceInput('govProjectSummary'),
+    wiki: document.getElementById('govProjectWiki')?.checked !== false,
+    claude_compat: document.getElementById('govProjectClaudeCompat')?.checked || false,
+    sync_after: document.getElementById('govProjectSyncAfter')?.checked !== false,
+  };
+  if (!payload.id) {
+    showToast('project-id를 입력하세요', { type: 'warning' });
+    return;
+  }
+  const resultEl = document.getElementById('governanceActionResult');
+  if (resultEl) resultEl.textContent = '프로젝트 등록 중…';
+  try {
+    const r = await safeFetch('/api/governance/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const syncOk = !r.sync || r.sync.ok;
+    if (r.sync) _renderGovernanceResult('프로젝트 등록 및 동기화', r.sync);
+    else if (resultEl) resultEl.textContent = '프로젝트 등록 완료';
+    showToast(syncOk ? '프로젝트 등록 완료' : '프로젝트 등록 완료, 동기화 실패', {
+      type: syncOk ? 'success' : 'warning',
+      duration: 3000,
+    });
+    _resetGovernanceProjectForm();
+    loadGovernanceStatus();
+    loadAuditLog();
+  } catch (e) {
+    if (resultEl) resultEl.textContent = `프로젝트 등록 실패: ${e.message || e}`;
+    showToast(`프로젝트 등록 실패: ${e.message || e}`, { type: 'error' });
+  }
+}
+
+async function _runGovernanceAction(url, label) {
+  const el = document.getElementById('governanceActionResult');
+  if (el) el.textContent = `${label} 실행 중…`;
+  showToast(`${label} 실행 중…`, { type: 'info', duration: 1800 });
+  try {
+    const r = await safeFetch(url, { method: 'POST' });
+    _renderGovernanceResult(label, r);
+    showToast(`${label} ${r.ok ? '완료' : '실패'}`, { type: r.ok ? 'success' : 'error', duration: 2500 });
+    loadGovernanceStatus();
+    loadAuditLog();
+  } catch (e) {
+    if (el) el.textContent = `${label} 요청 실패: ${e.message || e}`;
+    showToast(`${label} 요청 실패: ${e.message || e}`, { type: 'error' });
+  }
+}
+
+function refreshGovernance() { loadGovernanceStatus(); }
+function runGovernanceCheck() { _runGovernanceAction('/api/governance/check', 'Wiki 검사'); }
+function runGovernanceSync() { _runGovernanceAction('/api/governance/sync', '프로젝트 동기화'); }
+function runGovernanceTrack() { _runGovernanceAction('/api/governance/track', 'Zone 추적'); }
 
 async function exportCSV() {
   const a = document.createElement('a');
@@ -2715,16 +3037,11 @@ async function submitNodeRegister() {
   const resultEl = document.getElementById('nodeRegisterResult');
   if (!nodeId) { if (resultEl) resultEl.textContent = '\uB178\uB4DC ID\uB97C \uC785\uB825\uD558\uC138\uC694'; return; }
   try {
-    const resp = await fetch('/api/nodes', {
+    const d = await safeFetch('/api/nodes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ node_id: nodeId, label: label || null }),
     });
-    const d = await resp.json();
-    if (!resp.ok) {
-      if (resultEl) resultEl.textContent = d.error || '\uB4F1\uB85D \uC2E4\uD328';
-      return;
-    }
     if (resultEl) {
       resultEl.textContent = '';
       const msg = document.createElement('div');
@@ -2766,28 +3083,18 @@ async function submitNodeRegister() {
 async function rotateNodeKey(nodeId) {
   if (!confirm(nodeId + ' \uB178\uB4DC\uC758 Ingest Key\uB97C \uC7AC\uBC1C\uAE09\uD569\uB2C8\uB2E4. \uAE30\uC874 \uD0A4\uB294 \uBB34\uD6A8\uD654\uB429\uB2C8\uB2E4.')) return;
   try {
-    const resp = await fetch('/api/nodes/' + encodeURIComponent(nodeId) + '/rotate-key', { method: 'POST' });
-    const d = await resp.json();
-    if (resp.ok) {
-      prompt('\uC0C8 Ingest Key (\uBCF5\uC0AC\uD558\uC138\uC694):', d.ingest_key);
-      showToast('\uD0A4 \uC7AC\uBC1C\uAE09 \uC644\uB8CC', { type: 'success' });
-    } else {
-      showToast(d.error || '\uC2E4\uD328', { type: 'error' });
-    }
+    const d = await safeFetch('/api/nodes/' + encodeURIComponent(nodeId) + '/rotate-key', { method: 'POST' });
+    prompt('\uC0C8 Ingest Key (\uBCF5\uC0AC\uD558\uC138\uC694):', d.ingest_key);
+    showToast('\uD0A4 \uC7AC\uBC1C\uAE09 \uC644\uB8CC', { type: 'success' });
   } catch (e) { showToast('\uB124\uD2B8\uC6CC\uD06C \uC624\uB958', { type: 'error' }); }
 }
 
 async function deleteNode(nodeId) {
   if (!confirm(nodeId + ' \uB178\uB4DC\uB97C \uC0AD\uC81C\uD569\uB2C8\uB2E4. \uC218\uC9D1\uB41C \uB370\uC774\uD130\uB294 \uC720\uC9C0\uB429\uB2C8\uB2E4.')) return;
   try {
-    const resp = await fetch('/api/nodes/' + encodeURIComponent(nodeId), { method: 'DELETE' });
-    if (resp.ok) {
-      showToast(nodeId + ' \uC0AD\uC81C\uB428', { type: 'success' });
-      renderNodeList();
-    } else {
-      const d = await resp.json();
-      showToast(d.error || '\uC2E4\uD328', { type: 'error' });
-    }
+    await safeFetch('/api/nodes/' + encodeURIComponent(nodeId), { method: 'DELETE' });
+    showToast(nodeId + ' \uC0AD\uC81C\uB428', { type: 'success' });
+    renderNodeList();
   } catch (e) { showToast('\uB124\uD2B8\uC6CC\uD06C \uC624\uB958', { type: 'error' }); }
 }
 
@@ -2833,7 +3140,7 @@ function searchConversations(q) {
       box.innerHTML = d.results.map(r => {
         const safeName = highlightTokens(esc(r.project_name || ''), q);
         const safePreview = highlightTokens(esc((r.content_preview || '').slice(0, 200)), q);
-        return `<div class="px-3 py-2 border-b border-white/[0.03] cursor-pointer spring hover:bg-white/[0.03]" onclick="openConvFromSearch('${esc(r.session_id)}',${r.id})">
+        return `<div class="px-3 py-2 border-b border-white/[0.03] cursor-pointer spring hover:bg-white/[0.03]" data-action="openConvFromSearch" data-arg0="${esc(r.session_id)}" data-arg1="${esc(r.id)}" role="button" tabindex="0">
           <div class="flex justify-between items-center">
             <span class="text-[10px] font-semibold text-accent/60">${safeName}</span>
             <span class="text-[9px] text-white/15">${r.role==='user'?'사용자':'AI'} · ${fmtTime(r.timestamp)}</span>
@@ -2911,10 +3218,10 @@ async function openConvFromSearch(sid, messageId) {
 async function deleteProject(name, path) {
   try {
     const qs = path ? `?path=${encodeURIComponent(path)}` : '';
-    const pv = await fetch(
+    const pv = await safeFetch(
       `/api/projects/${encodeURIComponent(name)}${qs}`,
       { method: 'DELETE' }
-    ).then(r => r.json());
+    );
     openDeleteConfirm({
       target: name,
       message: `이 프로젝트의 ${fmtN(pv.sessions)}개 세션, ${fmtN(pv.messages)}건 메시지, ${fmt$(pv.cost)} 비용이 영구 삭제됩니다.`,
@@ -2923,7 +3230,7 @@ async function deleteProject(name, path) {
           const confirmQs = path
             ? `?path=${encodeURIComponent(path)}&confirm=true`
             : '?confirm=true';
-          await fetch(
+          await safeFetch(
             `/api/projects/${encodeURIComponent(name)}${confirmQs}`,
             { method: 'DELETE' }
           );
@@ -3176,7 +3483,7 @@ function renderProjectSessionsTab() {
     const arr = active
       ? (projectSessSort.order === 'asc' ? '<span class="text-accent ml-1">↑</span>' : '<span class="text-accent ml-1">↓</span>')
       : '<span class="text-white/15 ml-1">↕</span>';
-    return `<th class="${cls} px-3 py-2.5 font-bold cursor-pointer select-none hover:text-white/70 spring" onclick="sortProjectSessions('${col}')">${label}${arr}</th>`;
+    return `<th class="${cls} px-3 py-2.5 font-bold cursor-pointer select-none hover:text-white/70 spring" data-action="sortProjectSessions" data-arg="${esc(col)}" role="button" tabindex="0">${label}${arr}</th>`;
   };
   document.getElementById('projTabContent').innerHTML = `
     <div class="overflow-x-auto bg-white/[0.02] ring-1 ring-white/[0.06] rounded-xl">
@@ -3213,7 +3520,7 @@ function renderProjectSessionsTab() {
               <td class="px-3 py-3 text-right text-cyan-400/75 tabular-nums">${fmtTok(s.total_cache_read_tokens||0)}</td>
               <td class="px-3 py-3 text-right"><span class="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/85 font-bold tabular-nums">${fmt$(s.cost_usd)}</span></td>
               <td class="px-3 py-3 text-center">
-                <button onclick="openConvFromProject('${s.id}')" title="대화 보기" class="text-white/30 hover:text-accent spring"><iconify-icon icon="solar:arrow-right-linear" width="14"></iconify-icon></button>
+                <button data-action="openConvFromProject" data-arg="${esc(s.id)}" title="대화 보기" class="text-white/30 hover:text-accent spring"><iconify-icon icon="solar:arrow-right-linear" width="14"></iconify-icon></button>
               </td>
             </tr>
           `;
@@ -3297,8 +3604,8 @@ function renderProjectMessages() {
       </div>
       <div class="flex items-center gap-1.5">
         <span class="text-[9px] text-white/30 uppercase font-bold tracking-widest mr-1">정렬</span>
-        <button onclick="setProjConvOrder('asc')" class="px-3 py-1 rounded-full border spring text-[10px] font-bold ${projectConvOrder==='asc'?'bg-accent/15 text-accent border-accent/30':'text-white/45 border-white/[0.07] hover:text-white/70'}">오래된 순</button>
-        <button onclick="setProjConvOrder('desc')" class="px-3 py-1 rounded-full border spring text-[10px] font-bold ${projectConvOrder==='desc'?'bg-accent/15 text-accent border-accent/30':'text-white/45 border-white/[0.07] hover:text-white/70'}">최신 순</button>
+        <button data-action="setProjConvOrder" data-arg="asc" class="px-3 py-1 rounded-full border spring text-[10px] font-bold ${projectConvOrder==='asc'?'bg-accent/15 text-accent border-accent/30':'text-white/45 border-white/[0.07] hover:text-white/70'}">오래된 순</button>
+        <button data-action="setProjConvOrder" data-arg="desc" class="px-3 py-1 rounded-full border spring text-[10px] font-bold ${projectConvOrder==='desc'?'bg-accent/15 text-accent border-accent/30':'text-white/45 border-white/[0.07] hover:text-white/70'}">최신 순</button>
       </div>
     </div>`;
   if (!msgs.length) { content.innerHTML = header + '<div class="text-center text-white/25 text-xs py-12">메시지 없음</div>'; return; }
@@ -3335,7 +3642,7 @@ function renderProjectMessages() {
   if (total > msgs.length) {
     html += `
       <div class="text-center py-4">
-        <button onclick="loadMoreProjectMessages()"
+        <button data-action="loadMoreProjectMessages"
                 class="px-4 py-1.5 rounded-full text-[11px] font-bold bg-accent/10 text-accent border border-accent/25 hover:scale-[1.02] active:scale-[0.98] spring">
           더 보기 (${fmtN(msgs.length)} / ${fmtN(total)})
         </button>

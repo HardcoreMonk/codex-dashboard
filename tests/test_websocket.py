@@ -9,7 +9,6 @@ import sys
 
 import pytest
 
-
 TEST_PASSWORD = 'ws-test-pw'
 
 

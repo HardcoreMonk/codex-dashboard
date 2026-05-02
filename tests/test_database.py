@@ -1,9 +1,6 @@
 """Unit tests for database.py — migrations, FTS5, thread-local pool."""
 import sqlite3
-import sys
 import threading
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -229,8 +226,10 @@ def test_read_db_isolates_connections_across_threads(temp_db):
 
     t1 = threading.Thread(target=worker)
     t2 = threading.Thread(target=worker)
-    t1.start(); t2.start()
-    t1.join(); t2.join()
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
 
     assert len(seen) == 2
     assert seen[0] != seen[1], 'thread-local isolation broken'
@@ -248,8 +247,10 @@ def test_write_db_serializes_writes(temp_db):
                            (f't{n}-{i}', 0))
 
     threads = [threading.Thread(target=writer, args=(i,)) for i in range(4)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
     conn = sqlite3.connect(str(temp_db))
     n = conn.execute("SELECT COUNT(*) FROM file_watch_state").fetchone()[0]

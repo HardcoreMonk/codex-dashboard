@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 COLLECTOR_DOWNLOAD_PATH = '/api/collector.py'
 REMOVED_CLAUDE_API_PATHS = (
     '/api/claude-ai/stats',
@@ -50,10 +49,62 @@ def _clear_codex_runtime_rows():
             pass
 
 
+def _ensure_legacy_runtime_schema(conn):
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            project_name TEXT,
+            project_path TEXT,
+            cwd TEXT,
+            model TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            total_input_tokens INTEGER DEFAULT 0,
+            total_output_tokens INTEGER DEFAULT 0,
+            total_cache_creation_tokens INTEGER DEFAULT 0,
+            total_cache_read_tokens INTEGER DEFAULT 0,
+            cost_micro INTEGER DEFAULT 0,
+            message_count INTEGER DEFAULT 0,
+            user_message_count INTEGER DEFAULT 0,
+            is_subagent INTEGER DEFAULT 0,
+            parent_session_id TEXT,
+            parent_tool_use_id TEXT DEFAULT '',
+            agent_type TEXT DEFAULT '',
+            agent_description TEXT DEFAULT '',
+            task_prompt TEXT DEFAULT '',
+            final_stop_reason TEXT DEFAULT '',
+            pinned INTEGER DEFAULT 0,
+            tags TEXT DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            message_uuid TEXT UNIQUE,
+            role TEXT,
+            content TEXT,
+            content_preview TEXT,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cache_creation_tokens INTEGER DEFAULT 0,
+            cache_read_tokens INTEGER DEFAULT 0,
+            cost_micro INTEGER DEFAULT 0,
+            model TEXT,
+            timestamp TEXT,
+            stop_reason TEXT DEFAULT ''
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            content_preview,
+            content='messages',
+            content_rowid='id'
+        );
+    ''')
+
+
 def _seed_legacy_chain_collision():
     import database
 
     with database.write_db() as db:
+        _ensure_legacy_runtime_schema(db)
         db.execute('''
             INSERT INTO sessions
                 (id, project_name, project_path, cwd, model, created_at, updated_at,
@@ -170,6 +221,7 @@ def _boot_api_client(tmp_path, monkeypatch, dashboard_password=None):
     else:
         monkeypatch.setenv('DASHBOARD_PASSWORD', dashboard_password)
     monkeypatch.setenv('DASHBOARD_DB_PATH', str(db_file))
+    monkeypatch.setenv('DASHBOARD_DISABLE_WATCHER', '1')
 
     # Unregister any Prometheus collectors from a previous test run so the
     # re-import of main.py can re-register without duplicate errors.
@@ -541,6 +593,199 @@ def test_admin_db_compact_reports_before_after_breakdown(api_client, tmp_path):
     assert body['reclaimed_bytes'] >= 0
 
 
+def _seed_governance_workspace(tmp_path, monkeypatch):
+    import main
+
+    zone = tmp_path / 'zone'
+    repo = zone / 'codex-project-mgmt'
+    wiki = zone / 'wiki'
+    raw = zone / 'raw'
+    audit = wiki / 'audit'
+    scripts = repo / 'scripts'
+    scripts.mkdir(parents=True)
+    wiki.mkdir(parents=True)
+    raw.mkdir(parents=True)
+    audit.mkdir(parents=True)
+
+    projects = zone / 'projects.yaml'
+    projects.write_text(
+        '\n'.join([
+            'projects:',
+            '  - id: demo',
+            '    path: demo',
+            '    title: Demo',
+            '    kind: governance',
+            '    wiki: true',
+        ]) + '\n',
+        encoding='utf-8',
+    )
+    (wiki / 'index.md').write_text('# Codex Wiki\n\n- [[demo]]\n', encoding='utf-8')
+    entities = wiki / 'entities'
+    entities.mkdir()
+    (entities / 'demo.md').write_text('---\ntype: entity\n---\n# Demo\n', encoding='utf-8')
+    (wiki / 'log.md').write_text('# Log\n', encoding='utf-8')
+    (audit / 'zone-audit-latest.md').write_text(
+        '\n'.join([
+            '# Codex Zone Audit',
+            '',
+            '- generated: `2026-05-01T00:00:00+09:00`',
+            '- registry projects: `1`',
+            '- discovered git worktrees: `1`',
+            '- dirty git worktrees: `0`',
+            '- unregistered git worktrees: `0`',
+            '- raw snapshot drift: `0`',
+            '- high-signal secret hits: `0`',
+            '',
+            '## Git Hygiene',
+            '',
+            'No dirty git worktrees.',
+        ]) + '\n',
+        encoding='utf-8',
+    )
+    (scripts / 'wiki-check.sh').write_text(
+        '#!/usr/bin/env bash\nprintf "wiki-check ok: test\\n"\n',
+        encoding='utf-8',
+    )
+    (scripts / 'project-sync.sh').write_text(
+        '#!/usr/bin/env bash\nprintf "project-sync ok: test\\n"\n',
+        encoding='utf-8',
+    )
+    (scripts / 'zone-audit.sh').write_text(
+        '#!/usr/bin/env bash\nprintf "zone-audit ok: test\\n"\n',
+        encoding='utf-8',
+    )
+    (scripts / 'zone-track.sh').write_text(
+        '#!/usr/bin/env bash\nprintf "zone-track ok: test\\n"\n',
+        encoding='utf-8',
+    )
+
+    monkeypatch.setattr(main, 'ZONE_ROOT', zone.resolve())
+    monkeypatch.setattr(main, 'GOVERNANCE_REPO_DIR', repo.resolve())
+    monkeypatch.setattr(main, 'PROJECTS_REGISTRY_PATH', projects.resolve())
+    monkeypatch.setattr(main, 'WIKI_DIR', wiki.resolve())
+    monkeypatch.setattr(main, 'RAW_DIR', raw.resolve())
+    monkeypatch.setattr(main, 'AUDIT_DIR', audit.resolve())
+    monkeypatch.setattr(main, 'PROJECT_SYNC_SCRIPT', (scripts / 'project-sync.sh').resolve())
+    monkeypatch.setattr(main, 'WIKI_CHECK_SCRIPT', (scripts / 'wiki-check.sh').resolve())
+    monkeypatch.setattr(main, 'ZONE_AUDIT_SCRIPT', (scripts / 'zone-audit.sh').resolve())
+    monkeypatch.setattr(main, 'ZONE_TRACK_SCRIPT', (scripts / 'zone-track.sh').resolve())
+    return zone
+
+
+def test_governance_summary_reads_registry_and_wiki(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    r = api_client.get('/api/governance/summary')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['project_count'] == 1
+    assert body['projects'][0]['id'] == 'demo'
+    assert body['wiki']['page_count'] == 4
+    assert body['paths']['projects_registry']['exists'] is True
+    assert body['scripts']['wiki_check']['exists'] is True
+    assert body['scripts']['zone_track']['exists'] is True
+    assert body['audit']['metrics']['registry_projects'] == 1
+    assert body['audit']['metrics']['dirty_git_worktrees'] == 0
+
+
+def test_governance_latest_audit_reads_report(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    r = api_client.get('/api/governance/audit/latest')
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['relative_path'] == 'audit/zone-audit-latest.md'
+    assert body['metrics']['high_signal_secret_hits'] == 0
+    assert '# Codex Zone Audit' in body['text']
+
+
+def test_governance_wiki_page_rejects_path_traversal(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    r = api_client.get('/api/governance/wiki/page', params={'path': '../secrets'})
+    assert r.status_code == 400
+
+
+def test_governance_scripts_run_and_audit(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    check = api_client.post('/api/governance/check')
+    assert check.status_code == 200
+    assert check.json()['ok'] is True
+    assert 'wiki-check ok' in check.json()['stdout']
+
+    sync = api_client.post('/api/governance/sync')
+    assert sync.status_code == 200
+    assert sync.json()['ok'] is True
+    assert 'project-sync ok' in sync.json()['stdout']
+
+    audit = api_client.get('/api/admin/audit?action=governance_check')
+    assert audit.status_code == 200
+    assert audit.json()['entries'][0]['action'] == 'governance_check'
+
+
+def test_governance_track_runs_full_pipeline_and_audits(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    track = api_client.post('/api/governance/track')
+    assert track.status_code == 200
+    body = track.json()
+    assert body['ok'] is True
+    assert 'zone-track ok' in body['stdout']
+    assert body['audit']['metrics']['registry_projects'] == 1
+
+    audit = api_client.get('/api/admin/audit?action=governance_track')
+    assert audit.status_code == 200
+    assert audit.json()['entries'][0]['action'] == 'governance_track'
+
+
+def test_governance_project_add_appends_registry_and_runs_sync(api_client, tmp_path, monkeypatch):
+    zone = _seed_governance_workspace(tmp_path, monkeypatch)
+
+    r = api_client.post('/api/governance/projects', json={
+        'id': 'new-demo',
+        'path': 'new-demo',
+        'title': 'New Demo',
+        'kind': 'dashboard',
+        'summary': 'New project managed from dashboard.',
+        'wiki': True,
+        'claude_compat': False,
+        'sync_after': True,
+    })
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body['ok'] is True
+    assert body['project']['id'] == 'new-demo'
+    assert body['sync']['ok'] is True
+
+    registry = (zone / 'projects.yaml').read_text(encoding='utf-8')
+    assert '- id: new-demo' in registry
+    assert 'summary: New project managed from dashboard.' in registry
+
+    summary = api_client.get('/api/governance/summary').json()
+    assert {p['id'] for p in summary['projects']} == {'demo', 'new-demo'}
+
+    audit = api_client.get('/api/admin/audit?action=governance_project_add')
+    assert audit.status_code == 200
+    assert audit.json()['entries'][0]['detail']['id'] == 'new-demo'
+
+
+def test_governance_project_add_rejects_duplicate_and_bad_path(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    duplicate = api_client.post('/api/governance/projects', json={'id': 'demo'})
+    assert duplicate.status_code == 409
+
+    bad_path = api_client.post('/api/governance/projects', json={
+        'id': 'escape-demo',
+        'path': '../escape-demo',
+    })
+    assert bad_path.status_code == 400
+
+
 @pytest.mark.parametrize(
     'path',
     REMOVED_RUNTIME_PATHS,
@@ -562,6 +807,13 @@ def test_auth_me_reports_auth_required_when_password_set(auth_api_client):
 
 def test_protected_api_denied_without_login_when_password_set(auth_api_client):
     r = auth_api_client.get('/api/stats')
+
+    assert r.status_code == 401
+    assert r.json() == {'error': 'unauthorized'}
+
+
+def test_governance_api_denied_without_login_when_password_set(auth_api_client):
+    r = auth_api_client.get('/api/governance/summary')
 
     assert r.status_code == 401
     assert r.json() == {'error': 'unauthorized'}
@@ -612,22 +864,22 @@ def test_projects_separates_parent_and_subagent_counts(api_client):
     r = api_client.get('/api/projects?sort=name&order=asc')
     assert r.status_code == 200
     projects = r.json()['projects']
-    demo = next(p for p in projects if p['project_name'] == 'demo')
-    assert demo['session_count'] == 1     # parent-A only
-    assert demo['subagent_count'] == 2    # agent-1a, agent-1b
-    # Cost includes everything
-    assert demo['total_cost'] == pytest.approx(0.06 + 0.004 + 0.006, rel=0.01)
+    demo = next(p for p in projects if p['project_name'] == 'codex-demo')
+    assert demo['session_count'] == 2
+    assert demo['subagent_count'] == 0
+    assert demo['total_cost'] == 0.0
 
 
 def test_projects_top_shows_subagent_count(api_client):
     r = api_client.get('/api/projects/top?limit=5')
     assert r.status_code == 200
-    assert any(p['subagent_count'] > 0 for p in r.json()['projects'])
+    assert any(p['project_name'] == 'codex-demo' for p in r.json()['projects'])
 
 
 def test_usage_and_model_endpoints_prefer_codex_data_when_both_sources_exist(api_client):
-    import database
     from datetime import datetime, timedelta, timezone
+
+    import database
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
     recent = (now - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -1239,6 +1491,7 @@ def test_timeline_endpoint_prefers_codex_sessions_when_legacy_rows_overlap(api_c
     import sqlite3
 
     conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    _ensure_legacy_runtime_schema(conn)
     conn.execute('''INSERT INTO sessions
         (id, project_name, project_path, cwd, model, created_at, updated_at,
          total_input_tokens, total_output_tokens, cost_micro, message_count,
@@ -1275,6 +1528,7 @@ def test_timeline_hourly_endpoint_prefers_codex_messages_when_legacy_rows_overla
     import sqlite3
 
     conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    _ensure_legacy_runtime_schema(conn)
     conn.execute('''INSERT INTO sessions
         (id, project_name, project_path, cwd, model, created_at, updated_at,
          total_input_tokens, total_output_tokens, cost_micro, message_count,
@@ -1320,6 +1574,7 @@ def test_timeline_heatmap_endpoint_prefers_codex_messages_when_legacy_rows_overl
     import sqlite3
 
     conn = sqlite3.connect(str(tmp_path / 'api.db'))
+    _ensure_legacy_runtime_schema(conn)
     conn.execute('''INSERT INTO sessions
         (id, project_name, project_path, cwd, model, created_at, updated_at,
          total_input_tokens, total_output_tokens, cost_micro, message_count,
@@ -1551,17 +1806,18 @@ def test_subagent_messages_bypasses_sidechain_filter(api_client, tmp_path):
 
 # ─── G1/G2/G3 — stop_reason + parent_tool_use_id ───────────────────────
 
-def test_v7_columns_present(api_client, tmp_path):
-    """Schema columns from v7 must exist after init_db."""
+def test_codex_metadata_columns_present(api_client, tmp_path):
+    """Codex-native metadata columns must exist after init_db."""
     import sqlite3
     conn = sqlite3.connect(str(tmp_path / 'api.db'))
-    sess_cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
-    msg_cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+    sess_cols = {r[1] for r in conn.execute("PRAGMA table_info(codex_sessions)")}
+    msg_cols = {r[1] for r in conn.execute("PRAGMA table_info(codex_messages)")}
     conn.close()
     assert 'final_stop_reason' in sess_cols
-    assert 'parent_tool_use_id' in sess_cols
-    assert 'task_prompt' in sess_cols
-    assert 'stop_reason' in msg_cols
+    assert 'tags' in sess_cols
+    assert 'source_node' in sess_cols
+    assert 'content_preview' in msg_cols
+    assert 'model' in msg_cols
 
 
 def test_subagent_endpoint_exposes_stop_reason_and_parent_tool_use(api_client, tmp_path):
@@ -1760,6 +2016,7 @@ def test_session_tag_updates_do_not_touch_legacy_rows_for_codex_sessions(api_cli
     import database
 
     with database.write_db() as db:
+        _ensure_legacy_runtime_schema(db)
         db.execute(
             """
             INSERT OR REPLACE INTO sessions
@@ -1833,10 +2090,10 @@ def test_forecast_endpoint(api_client):
 
 def test_session_chain_endpoint(api_client):
     """/api/sessions/{id}/chain must return root + nodes."""
-    r = api_client.get('/api/sessions/parent-A/chain')
+    r = api_client.get('/api/sessions/codex-s1/chain')
     assert r.status_code == 200
     body = r.json()
-    assert body['root'] == 'parent-A'
+    assert body['root'] == 'codex-s1'
     assert 'nodes' in body
     assert isinstance(body['nodes'], list)
 

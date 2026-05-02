@@ -14,7 +14,7 @@ API 상세는 `API.md`, DB 스키마는 `SCHEMA.md` 를 참고.
            |
      [watchdog + 30s poll]      codex_watcher.py
            |
-     [JSONL 파싱 + 비용 계산]    codex_parser.py
+     [JSONL 파싱 + 이벤트 정규화] codex_parser.py
            |
      [SQLite WAL 쓰기]          database.py
            |
@@ -25,6 +25,14 @@ Codex JSONL/이벤트 적재           store_codex_message()
    REST API WS   Admin status
        \    |     /
       [SPA 프론트엔드]           static/*.js
+
+/data/projects/codex-zone/projects.yaml
+           |
+     [Governance API]         /api/governance/*
+           |
+codex-project-mgmt/scripts/{project-sync,wiki-check,zone-track}.sh
+           |
+/data/projects/codex-zone/{wiki,raw,projects}
 ```
 
 단일 프로세스 (uvicorn) 가 파일 감시, DB 관리, Codex 인덱스 조회, API 서빙, WebSocket 브로드캐스트를 모두 처리한다.
@@ -60,25 +68,27 @@ uvicorn main:app --host 0.0.0.0 --port 8617 --loop asyncio --http h11
 
 ### main.py — FastAPI 애플리케이션
 
-HTTP routes + 1 WebSocket 을 호스팅.
+애플리케이션 정의 기준 88 HTTP routes + 1 WebSocket 을 호스팅한다.
+FastAPI 자동 문서 route(`/docs`, `/redoc`, `/openapi.json`, OAuth redirect)를 포함하면 HTTP route는 92개다.
 
 | 그룹 | 라우트 | 역할 |
 |---|---|---|
-| 인증 | `/login`, `/api/auth/login`, `/logout`, `/me` | 쿠키 세션 인증 (HMAC 서명, rate limit 5/min/IP) |
-| 페이지 | `/features` | Feature Reference HTML 페이지 (인증 우회) |
+| 인증 | `/login`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/me` | 쿠키 세션 인증 (HMAC 서명, rate limit 5/min/IP) |
+| 페이지 | `/`, `/app`, `/features`, `/landing/ops`, `/landing/team`, `/landing/executive` | 공개 랜딩, 보호 앱 shell, Feature Reference |
 | 헬스 | `/api/health` | 서버 상태 + DB 메시지/세션 카운트 |
 | 메트릭 | `/metrics` | Prometheus text format (인증 우회) |
 | 세션 | `/api/sessions`, `/{id}`, `/{id}/messages`, `/{id}/message-position`, `/{id}/subagents`, `/{id}/chain`, `/{id}/pin`, `/{id}/tags` | Codex 기본 세션 조회/관리 경로 |
-| Codex | `/api/search/messages`, `/api/search/messages/{message_id}/context`, `/api/sessions/{id}/replay`, `/api/codex/sessions`, `/api/codex/sessions/{id}/messages`, `/api/codex/projects/{name}/stats`, `/api/codex/projects/{name}/messages`, `/api/timeline/summary`, `/api/usage/summary`, `/api/agents/summary` | Codex 메시지 검색, 문맥 복기, 세션 리플레이, 프로젝트 상세, 타임라인/사용량/agent 요약 |
+| Codex | `/api/search/messages`, `/api/search/messages/{message_id}/context`, `/api/sessions/{id}/replay`, `/api/codex/stats`, `/api/codex/models`, `/api/codex/projects`, `/api/codex/projects/top`, `/api/codex/projects/{name}/stats`, `/api/codex/projects/{name}/messages`, `/api/codex/sessions`, `/api/codex/sessions/table`, `/api/codex/sessions/{id}`, `/api/codex/sessions/{id}/messages`, `/api/codex/usage/periods`, `/api/codex/usage/hourly`, `/api/codex/usage/daily`, `/api/codex/forecast`, `/api/codex/plan/usage`, `/api/timeline/summary`, `/api/usage/summary`, `/api/agents/summary` | Codex 메시지 검색, 문맥 복기, 세션 리플레이, 프로젝트 상세, 타임라인/사용량/agent 요약 |
 | 프로젝트 | `/api/projects`, `/top`, `/{name}/stats`, `/{name}/messages` | 프로젝트 집계, TOP 5, 상세 |
-| 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 토큰/비용 집계 |
+| 사용량 | `/api/usage/hourly`, `/daily`, `/periods` | 시계열 메시지와 호환 토큰/비용 집계 |
 | 타임라인 | `/api/timeline`, `/timeline/heatmap`, `/timeline/hourly` | Gantt 데이터, 요일x시간 히트맵, 시간별 프로젝트×세션 집계 |
-| 모델 | `/api/models` | 모델별 비용/토큰 집계 |
+| 모델 | `/api/models` | 모델별 메시지와 호환 비용/토큰 집계 |
 | Subagent | `/api/subagents`, `/stats`, `/heatmap` | subagent 분석 |
-| 예측 | `/api/forecast` | MTD 비용 예측, 예산 소진 시간 |
+| 예측 | `/api/forecast` | Codex 메시지 기반 forecast와 호환 예산 payload |
 | 플랜 | `/api/plan/detect`, `/plan/config`, `/plan/usage` | 요금제 감지, 예산 설정 |
 | 원격 수집 | `/api/ingest`, `/api/nodes` | 다중 서버 JSONL 수집 (`codex_collector.py` → POST `/api/ingest`) |
-| 관리 | `/api/admin/backup`, `/retention`, `/retention/schedule`, `/db-size`, `/status`, `/audit` | 백업, 보존 + 자동 스케줄러, Codex ingest 상태를 포함한 대시보드 상태, 감사 로그 |
+| 관리 | `/api/admin/backup`, `/retention`, `/db-compact`, `/db-size`, `/audit`, `/retention/schedule`, `/status` | 백업, 보존 + 자동 스케줄러, DB compact, Codex ingest 상태를 포함한 대시보드 상태, 감사 로그 |
+| Governance | `/api/governance/summary`, `/wiki/index`, `/wiki/page`, `/audit/latest`, `/check`, `/sync`, `/track`, `/projects` | `codex-zone` registry/wiki/raw/audit 상태 조회, 신규 project 등록, sync/check/track 실행 |
 | 내보내기 | `/api/export/csv` | 세션 CSV 다운로드 |
 | WebSocket | `/ws` | 실시간 메시지 브로드캐스트 |
 
@@ -89,7 +99,30 @@ HTTP routes + 1 WebSocket 을 호스팅.
 ```
 
 - `metrics`: 모든 요청을 `http_requests_total{method,path,status}` 로 카운트 (라우트 템플릿 기반, cardinality 제어)
-- `auth`: `DASHBOARD_PASSWORD` 설정 시 쿠키 세션 검증 (`dash_session`). `/`, `/static/*`, `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py`, `/login` 은 우회
+- `auth`: `DASHBOARD_PASSWORD` 설정 시 쿠키 세션 검증 (`dash_session`). `/`, `/static/*`, `/login`, `/features`, `/landing/ops`, `/landing/team`, `/landing/executive`, `/api/auth/login`, `/api/auth/me`, `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py` 는 우회
+
+### Governance 연동
+
+`main.py`는 `codex-project-mgmt`를 임의 명령 실행기가 아니라 제한된 governance
+adapter로 다룬다.
+
+| 항목 | 기본값 | 역할 |
+|---|---|---|
+| `CODEX_ZONE_ROOT` | `/data/projects/codex-zone` | zone source of truth |
+| `CODEX_GOVERNANCE_REPO_DIR` | `$CODEX_ZONE_ROOT/codex-project-mgmt` | sync/check/track script 위치 |
+| `CODEX_PROJECTS_REGISTRY` | `$CODEX_ZONE_ROOT/projects.yaml` | project registry |
+| `CODEX_ZONE_WIKI_DIR` | `$CODEX_ZONE_ROOT/wiki` | production wiki |
+| `CODEX_ZONE_RAW_DIR` | `$CODEX_ZONE_ROOT/raw` | raw snapshot |
+| `CODEX_ZONE_AUDIT_DIR` | `$CODEX_ZONE_WIKI_DIR/audit` | zone audit report |
+
+보안 경계:
+
+- `/api/governance/*`는 인증 우회 목록에 없다.
+- 실행 가능한 스크립트는 `project-sync.sh`, `wiki-check.sh`, `zone-track.sh`로 allowlist된다.
+- 최신 `zone-audit-latest.md`는 `/api/governance/summary`와 `/api/governance/audit/latest`에서 metric으로 노출된다.
+- 신규 project 등록은 zone root 내부 상대 경로만 허용한다.
+- `projects.yaml` append는 lock과 temp file replace로 수행한다.
+- 모든 mutation은 `admin_audit`에 `governance_*` action으로 기록된다.
 
 ### database.py — SQLite 데이터 계층
 
@@ -141,9 +174,9 @@ startup bootstrap 역시 Codex 전용이다. primary UI/API 에 필요한 스키
 ### codex_parser.py — JSONL 파싱 엔진
 
 ```
-JSONL 레코드 → type 분기 (user/assistant/system)
-           → 세션 upsert + 메시지 insert
-           → 비용 계산 (micro-dollars)
+Codex JSONL 레코드 → event/message/tool/agent 정규화
+                  → codex_projects/codex_sessions/codex_messages 저장
+                  → 검색/리플레이용 content_preview 생성
 ```
 
 **핵심 로직:**
@@ -151,12 +184,14 @@ JSONL 레코드 → type 분기 (user/assistant/system)
 | 함수 | 역할 |
 |---|---|
 | `parse_jsonl_file()` | 파일을 줄 단위로 파싱, 깨진 줄 스킵+카운트 |
-| `process_record()` | 타입별 디스패치 (user/assistant/system) |
-| `calculate_cost_micro()` | usage 딕트 + 모델 → 정수 micro-dollars |
+| `iter_codex_records()` | Codex JSONL 레코드 iterator |
+| `normalize_codex_record()` | Codex 원본 shape를 event/message/tool/agent 모델로 정규화 |
+| `process_record()` | legacy-compatible parser 경로의 타입별 디스패치 |
+| `calculate_cost_micro()` | usage 딕트 + 모델 → 정수 micro-dollars (legacy-compatible helper) |
 | `effective_session_id()` | subagent 파일이면 filename basename 사용 |
 | `project_info_from_cwd()` | cwd → (project_path, project_name) |
 
-**비용 계산:**
+**비용 계산 호환성:**
 
 ```python
 cost = input_tokens * rate.input
@@ -167,6 +202,8 @@ cost = input_tokens * rate.input
 ```
 
 6개 모델 가격표 (`MODEL_PRICING`) + family fallback (opus/sonnet/haiku substring 매칭).
+
+현재 Codex-native 저장소(`codex_*`)는 원본 이벤트 검색과 리플레이를 우선하며 토큰/비용 컬럼을 별도로 저장하지 않는다. 비용·토큰 API shape는 호환성을 위해 유지되고, Codex 이벤트에 신뢰 가능한 usage 메타데이터가 없을 때는 0 값으로 응답한다.
 
 ### codex_watcher.py — 파일 감시
 
@@ -227,7 +264,7 @@ getChart(id), setChart(id, inst), destroyChart(id)
 setPage(n), setAdvFilters(obj), ...
 ```
 
-- `data-action` 이벤트 위임: 인라인 `onclick` 대신 `data-action="actionName"` 속성 + delegated click handler 로 이벤트 처리.
+- `data-action` 이벤트 위임: inline DOM handler 속성 대신 `data-action="actionName"` + delegated click/keyboard handler 로 이벤트 처리.
 
 ### 상태 관리
 
@@ -310,20 +347,16 @@ watcher 변경 감지                    connectWS()
 - **부모 링크:** 디렉터리 구조에서 `parent_session_id` 추출, `.meta.json` sidecar 에서 `agentType`/`description` 로드
 - **프로젝트:** 최초 `cwd` 값 고정 (후속 레코드의 cwd 변경 무시)
 
-### 비용 흐름
+### 비용·토큰 호환 흐름
 
 ```
-JSONL 레코드 usage 블록
-  → parser.calculate_cost_micro(usage, model)
-    → MODEL_PRICING[model] 또는 family fallback
-    → SUM(tokens × rate) × 1,000,000 → INTEGER
-  → messages.cost_micro 저장
-  → sessions.cost_micro += delta (누적)
-  → API: cost_micro * 1.0 / 1000000 AS cost_usd
-  → 프론트: fmt$() 로 표시
+Codex 이벤트
+  → codex_messages 저장 (content/content_preview/timestamp/model)
+  → 사용량 API는 Codex message/session count를 우선 응답
+  → token/cost 필드는 호환 shape 유지, 신뢰 가능한 usage가 없으면 0
 ```
 
-float 누적 오차 완전 차단 — DB 에서 프론트까지 정수 연산.
+legacy-compatible parser helper가 `cost_micro`를 다룰 때는 1 USD = 1,000,000 micro-dollars 정수 규칙을 유지하며, float 누적은 금지한다.
 
 ### 프로젝트 상태 4단계
 
@@ -410,8 +443,8 @@ codex-web-dashboard-retention.service → 오래된 데이터 정리
 | 계층 | 방어 |
 |---|---|
 | **인증** | `DASHBOARD_PASSWORD` → 쿠키 세션 (`dash_session`, HMAC 서명, 만료 내장). 로그인 rate limit 5회/분/IP |
-| **SQL** | 전 쿼리 파라미터화. ORDER BY 화이트리스트. LIKE 는 ESCAPE 필수 |
-| **XSS** | `h()` 헬퍼 (DOM API), `esc()` (entity encoding). innerHTML 금지 |
+| **SQL** | 값 파라미터화. ORDER BY 화이트리스트. LIKE 는 ESCAPE 필수. 고정 placeholder 조합만 허용 |
+| **XSS** | `h()`/DOM API 우선. `innerHTML` 사용 시 사용자 데이터는 `esc()` entity encoding 필수 |
 | **삭제 확인** | `openDeleteConfirm()` — 타겟 이름 정확 입력 후 confirm |
 | **CSRF** | 쿠키 세션 + `SameSite=Lax` 로 기본 보호 |
 | **WebSocket** | `_ws_auth_ok()` — `dash_session` 쿠키 검증 |
@@ -427,7 +460,7 @@ codex-web-dashboard-retention.service → 오래된 데이터 정리
 [원격 서버]                        [대시보드 서버]
 codex_collector.py                POST /api/ingest
   watchdog + poll                   → X-Ingest-Key 인증
-  → JSONL 변경 감지                  → parser.process_record(source_node=node_id)
+  → JSONL 변경 감지                  → codex_parser.process_record(source_node=node_id)
   → POST /api/ingest                → DB 저장 + WS broadcast
 ```
 
@@ -446,18 +479,19 @@ codex_collector.py                POST /api/ingest
 
 ## 테스트 커버리지
 
-174 pytest across 11 test files:
+318 pytest across 12 test files:
 
 | 파일 | 테스트 수 | 영역 |
 |---|---|---|
-| `test_parser.py` | 37 | JSONL 파싱, 비용 계산, subagent 식별 |
-| `test_api.py` | 34 | REST 엔드포인트, 정렬, 필터, 페이지네이션 |
-| `test_contract.py` | 32 | API 응답 스키마 계약 |
-| `test_auth.py` | 18 | 쿠키 세션 인증, rate limit, 로그인/로그아웃 |
-| `test_ingest.py` | 12 | 원격 노드 수집, ingest key 검증 |
-| `test_database.py` | 10 | 마이그레이션, 쓰기/읽기 분리 |
-| `test_watcher.py` | 9 | 파일 감시, 건강 검사, 재시작 |
-| `test_e2e_smoke.py` | 8 | 엔드투엔드 통합 (서버 기동 → API 호출) |
+| `test_api.py` | 106 | REST 엔드포인트, Codex-only fallback, 정렬, 필터, 페이지네이션 |
+| `test_contract.py` | 41 | API 응답 스키마 계약 |
+| `test_e2e_smoke.py` | 46 | 엔드투엔드 통합 (서버 기동 → API 호출) |
+| `test_parser.py` | 39 | JSONL 파싱, 비용 계산, subagent 식별 |
+| `test_auth.py` | 20 | 쿠키 세션 인증, rate limit, 로그인/로그아웃 |
+| `test_watcher.py` | 17 | 파일 감시, 건강 검사, 재시작 |
+| `test_ingest.py` | 14 | 원격 노드 수집, ingest key 검증 |
+| `test_database.py` | 11 | 마이그레이션, 쓰기/읽기 분리 |
+| `test_codex_parser.py` | 10 | Codex JSONL 정규화 |
 | `test_collector.py` | 6 | collector 에이전트 로직 |
 | `test_websocket.py` | 5 | WS 인증, 메시지 수신, ping/pong |
-| `test_backup_restore.py` | 3 | DR 스크립트 |
+| `test_backup_restore.py` | 3 | SQLite 백업/복원 |

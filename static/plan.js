@@ -1,9 +1,8 @@
 // Codex Dashboard — plan/budget module.
 // Extracted from app.js. Loaded as a regular (non-module) script after app.js;
-// all functions become window.* globals so inline onclick="openPlanSettings()"
-// handlers in index.html continue to resolve.
+// all functions become window.* globals for data-action handlers.
 //
-// Dependencies from app.js: state, fetch, reportError, showToast, fmt$,
+// Dependencies from app.js: state, safeFetch, reportError, showToast, fmt$,
 // fmtTok, fmtN.
 
 // ─── Plan Usage ─────────────────────────────────────────────────────────
@@ -15,9 +14,7 @@ function clearPlanTimer() {
 
 async function loadPlanUsage() {
   try {
-    const resp = await fetch('/api/codex/plan/usage');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    planData = await resp.json();
+    planData = await safeFetch('/api/codex/plan/usage');
     renderPlanBlock('Daily', planData.daily);
     renderPlanBlock('Weekly', planData.weekly);
     loadCodexPlanSummary();
@@ -155,8 +152,9 @@ function fmtResetTime(iso) {
 }
 
 // ─── Plan Settings modal ───────────────────────────────────────────────
-function openPlanSettings() {
-  fetch('/api/plan/config').then(r => r.json()).then(cfg => {
+async function openPlanSettings() {
+  try {
+    const cfg = await safeFetch('/api/plan/config');
     document.getElementById('cfgDailyLimit').value    = cfg.daily_cost_limit  || 50;
     document.getElementById('cfgWeeklyLimit').value   = cfg.weekly_cost_limit || 300;
     document.getElementById('cfgResetHour').value     = cfg.reset_hour         || 0;
@@ -169,7 +167,9 @@ function openPlanSettings() {
     }
     setSettingsTab('plan');
     document.getElementById('planModal').style.display = 'flex';
-  });
+  } catch (e) {
+    reportError('openPlanSettings', e);
+  }
 }
 
 function setSettingsTab(tab) {
@@ -205,15 +205,11 @@ async function savePlanConfig() {
     timezone_name:     'Asia/Seoul',
   };
   try {
-    const r = await fetch('/api/plan/config', {
+    await safeFetch('/api/plan/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || r.statusText);
-    }
     closePlanSettings();
     loadPlanUsage();
     showToast('설정이 저장되었습니다', { type: 'success' });

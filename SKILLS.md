@@ -43,6 +43,9 @@ Codex Dashboard 저장소에서 자주 쓰는 Codex / gstack 작업 흐름 요�
 ```bash
 npm run build
 ./.venv/bin/python -m pytest -q tests/test_auth.py tests/test_e2e_smoke.py
+./.venv/bin/ruff check .
+./.venv/bin/bandit -r main.py database.py codex_parser.py codex_watcher.py codex_collector.py -s B101,B608 -q
+./.venv/bin/pip-audit --strict
 curl http://127.0.0.1:8617/api/auth/me
 ss -ltnp | grep 8617
 ```

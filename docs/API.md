@@ -1,6 +1,6 @@
 # REST API
 
-62 HTTP routes + 1 WebSocket. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py`, `/login`, `/features` 은 인증 우회.
+애플리케이션 정의 기준 90 HTTP routes + 1 WebSocket. FastAPI 자동 문서 route(`/docs`, `/redoc`, `/openapi.json`, OAuth redirect)를 포함하면 HTTP route는 94개다. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/`, `/static/*`, `/login`, `/features`, `/landing/ops`, `/landing/team`, `/landing/executive`, `/api/auth/login`, `/api/auth/me`, `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py` 는 인증 우회.
 
 프로젝트 기준과 문서 우선순위는 `AGENTS.md`를 따른다. 이 문서는 인터페이스 계약과 호출 예시에 집중한다.
 
@@ -27,6 +27,10 @@ curl -s http://localhost:8617/openapi.json | jq '.paths | keys' | head
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/login` | 로그인 페이지 HTML (인증 우회) |
+| GET | `/` | 공개 랜딩 페이지 (인증 우회) |
+| GET | `/landing/ops` | Ops 대상 공개 랜딩 페이지 (인증 우회) |
+| GET | `/landing/team` | Team 대상 공개 랜딩 페이지 (인증 우회) |
+| GET | `/landing/executive` | Executive 대상 공개 랜딩 페이지 (인증 우회) |
 | POST | `/api/auth/login` | 로그인. Body: `{password}`. 성공 시 `dash_session` 쿠키 발급 (HMAC 서명, 만료 내장). Rate limit: 5회/분/IP |
 | POST | `/api/auth/logout` | 로그아웃 (`dash_session` 쿠키 삭제) |
 | GET | `/api/auth/me` | 현재 인증 상태 확인. 응답: `{authenticated, auth_required}` |
@@ -61,7 +65,7 @@ curl -i http://127.0.0.1:8617/api/stats
 | GET | `/api/usage/periods` | 일/주/월 사용량 + 이전 기간 대비 증감 |
 | GET | `/api/usage/hourly?hours=N` | 시간별 (KST) |
 | GET | `/api/usage/daily?days=N` | 일별 (KST) |
-| GET | `/api/forecast?days=N` | 월말 비용 예측 + 일/주간 burn-out 시각 |
+| GET | `/api/forecast?days=N` | 월말 forecast + 일/주간 burn-out 호환 payload. Codex usage 메타데이터가 없으면 비용 필드는 0 |
 
 ## 세션
 
@@ -86,10 +90,22 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 |---|---|---|
 | GET | `/api/search/messages?q=k` | Codex 메시지 전문 검색. `project`, `role`, `limit` 지원 |
 | GET | `/api/search/messages/{message_id}/context?window=N` | 특정 Codex 메시지 주변 문맥 조회 |
+| GET | `/api/codex/stats` | Codex 저장소 기반 전체/오늘 통계 payload |
+| GET | `/api/codex/models` | Codex 메시지 기반 모델 집계 |
+| GET | `/api/codex/projects` | Codex 프로젝트 목록 집계 |
+| GET | `/api/codex/projects/top` | Codex 프로젝트 TOP 목록과 최근 메시지 preview |
 | GET | `/api/codex/projects/{name}/stats?path=` | Codex 프로젝트 상세 요약/세션/모델/일별 집계 |
 | GET | `/api/codex/projects/{name}/messages?path=&limit=&offset=&order=` | Codex 프로젝트 전체 메시지 스트림 |
 | GET | `/api/sessions/{id}/replay` | Codex 세션 리플레이 페이로드 조회 |
 | GET | `/api/codex/sessions?limit=N` | 최신 Codex 세션 목록 |
+| GET | `/api/codex/sessions/table?page=&per_page=` | 대시보드 표 형태의 Codex 세션 목록 |
+| GET | `/api/codex/sessions/{id}` | Codex 세션 상세 payload |
+| GET | `/api/codex/sessions/{id}/messages?limit=&offset=` | Codex 세션 메시지 목록 |
+| GET | `/api/codex/usage/periods` | Codex 저장소 기반 일/주/월 사용량 payload |
+| GET | `/api/codex/usage/hourly?hours=N` | Codex 저장소 기반 시간별 메시지 집계 |
+| GET | `/api/codex/usage/daily?days=N` | Codex 저장소 기반 일별 메시지 집계 |
+| GET | `/api/codex/forecast?days=N` | Codex 저장소 기반 forecast payload |
+| GET | `/api/codex/plan/usage` | Codex 저장소 기반 예산 사용량 payload |
 | GET | `/api/timeline/summary?limit=N&date_from=&date_to=` | 최근 Codex 이벤트 + 세션 요약 |
 | GET | `/api/usage/summary` | Codex 세션/메시지/역할 사용량 요약 |
 | GET | `/api/agents/summary?limit=N` | Codex agent 실행 요약 |
@@ -118,7 +134,7 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/api/timeline?date_from=D&date_to=D` | Gantt 용 세션 목록 (start/end, cost, model, project). `include_subagents`, `limit`, `node` |
-| GET | `/api/timeline/heatmap?days=N` | 요일×시간 7×24 행렬 (메시지 수, 비용). 기본 90일 |
+| GET | `/api/timeline/heatmap?days=N` | 요일×시간 7×24 행렬 (메시지 수, 호환 비용). 기본 90일 |
 | GET | `/api/timeline/hourly?date=YYYY-MM-DD` | 특정 일자 시간별 (0~23) 프로젝트×세션 집계. `include_subagents`. 슬롯별 projects/sessions/message_count/cost_usd/tokens 반환 |
 
 ## 프로젝트·태그
@@ -127,7 +143,7 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 |---|---|---|
 | GET | `/api/models` | 모델별 분석 (sort/order, page/per_page) |
 | GET | `/api/projects` | path 기반 그룹 + session/subagent 카운트 분리 (sort/order, page/per_page) |
-| GET | `/api/projects/top?limit=N` | 비용 상위 N개 |
+| GET | `/api/projects/top?limit=N` | 프로젝트 TOP N. Codex usage 메타데이터가 없으면 비용 정렬 값은 0 |
 | GET | `/api/projects/{name}/stats` | `?path=` 모호성 해소, sessions 배열 포함 |
 | GET | `/api/projects/{name}/messages` | 프로젝트 전체 대화 취합 (limit/offset/order, `?path=`) |
 | DELETE | `/api/projects/{name}` | preview → confirm (`?path=` 필요 시) |
@@ -151,11 +167,62 @@ Codex 전용 인덱스(`codex_projects`, `codex_sessions`, `codex_messages`)를 
 |---|---|---|
 | POST | `/api/admin/backup` | DB 백업 (`_write_lock` + `sqlite3.backup()`, 10개 유지). 감사 `action=backup` |
 | DELETE | `/api/admin/retention` | 오래된 세션 삭제. `?older_than_days=N&confirm=true`. preview → confirm 2단계. 감사 `action=retention` |
+| POST | `/api/admin/db-compact` | WAL checkpoint + incremental vacuum 기반 DB 공간 회수. 감사 `action=db_compact` |
 | GET | `/api/admin/db-size` | DB 파일 크기 (bytes / MB) |
 | GET | `/api/admin/status` | 가동시간, 스키마 버전, DB·WAL 크기, 세션·메시지·subagent·원격노드·audit 카운트, Codex ingest 상태 (`source_kind=codex`, `indexed_sessions`, `indexed_messages`), watcher 상태·큐·추적 파일 수 |
 | GET | `/api/admin/audit?limit=100&action=` | 감사 로그 조회 (최근순, action 필터) |
 | GET | `/api/admin/retention/schedule` | 보존 스케줄 설정 조회 — `{enabled, interval_hours, older_than_days, last_run_at, last_result, next_run_at}` |
 | PUT | `/api/admin/retention/schedule` | 스케줄 갱신 (enabled/interval_hours/older_than_days). 감사 `action=retention_schedule_update`. 내장 asyncio 루프가 60초마다 확인하여 due 시 자동 실행 (`action=retention_scheduled`) |
+
+## Governance / Wiki
+
+Linux `codex-zone`의 project registry, production wiki, raw snapshot 자동화를
+대시보드 관리 화면에서 조작하는 보호 API다. 인증 우회 목록에 포함하지 않는다.
+
+기본 경로는 환경변수로 바꿀 수 있다.
+
+| 환경변수 | 기본값 |
+|---|---|
+| `CODEX_ZONE_ROOT` | `/data/projects/codex-zone` |
+| `CODEX_GOVERNANCE_REPO_DIR` | `$CODEX_ZONE_ROOT/codex-project-mgmt` |
+| `CODEX_PROJECTS_REGISTRY` | `$CODEX_ZONE_ROOT/projects.yaml` |
+| `CODEX_ZONE_WIKI_DIR` | `$CODEX_ZONE_ROOT/wiki` |
+| `CODEX_ZONE_RAW_DIR` | `$CODEX_ZONE_ROOT/raw` |
+| `CODEX_ZONE_AUDIT_DIR` | `$CODEX_ZONE_WIKI_DIR/audit` |
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/governance/summary` | registry project 목록, 경로 존재 여부, wiki/raw/audit count와 최신 audit metric, sync/check/track script 상태 |
+| GET | `/api/governance/wiki/index` | `wiki/index.md` 본문과 파일 메타데이터 |
+| GET | `/api/governance/wiki/page?path=<rel>` | wiki 내부 markdown 파일 조회. `..`, 절대 경로, 비-`.md` 파일 차단 |
+| GET | `/api/governance/audit/latest` | `wiki/audit/zone-audit-latest.md` 본문, 파일 메타데이터, 상단 metric 파싱 결과 |
+| POST | `/api/governance/check` | allowlist된 `scripts/wiki-check.sh` 실행. 감사 `action=governance_check` |
+| POST | `/api/governance/sync` | allowlist된 `scripts/project-sync.sh` 실행. 감사 `action=governance_sync` |
+| POST | `/api/governance/track` | allowlist된 `scripts/zone-track.sh` 실행. sync/check/audit를 한 번에 수행하고 감사 `action=governance_track` |
+| POST | `/api/governance/projects` | 신규 project를 `projects.yaml`에 append하고 선택적으로 sync 실행. 감사 `action=governance_project_add` |
+
+`POST /api/governance/projects` body:
+
+```json
+{
+  "id": "purecvisor-windows-edge",
+  "path": "purecvisor-windows-edge",
+  "title": "Purecvisor Windows Edge",
+  "kind": "project",
+  "summary": "Windows Server 전용 Purecvisor Edge client.",
+  "wiki": true,
+  "sync_after": true
+}
+```
+
+제약:
+
+- `id`는 `[A-Za-z0-9][A-Za-z0-9_.-]{0,79}` 형식.
+- `path`는 zone root 기준 상대 경로만 허용한다.
+- `wiki`는 registry의 wiki 생성/동기화 여부를 지정한다.
+- 중복 `id` 또는 중복 `path`는 `409`로 거부한다.
+- 스크립트 실행은 `project-sync.sh`, `wiki-check.sh`, `zone-track.sh`만 allowlist한다.
+- `project-sync.sh`, `wiki-check.sh` 실행 제한 시간은 60초, `zone-track.sh`는 180초이며 stdout/stderr는 잘라서 응답한다.
 
 ## 원격 노드 수집
 
@@ -199,4 +266,7 @@ curl -s 'http://localhost:8617/api/sessions/<sid>/chain?depth=4' | jq .
 curl -o codex-usage.csv http://localhost:8617/api/export/csv
 curl -s http://localhost:8617/metrics | grep dashboard_
 
+# Governance / Wiki
+curl -b cookies.txt -s http://localhost:8617/api/governance/summary | jq '.project_count'
+curl -b cookies.txt -s -X POST http://localhost:8617/api/governance/check | jq .
 ```

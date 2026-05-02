@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&display=swap">
 
 <!-- Tailwind CSS (built from app.css via build.js) -->
-<link rel="stylesheet" href="/static/tailwind.v79.css">
+<link rel="stylesheet" href="/static/tailwind.v91.css">
 
 <!-- Pretendard (Korean) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
@@ -33,21 +33,37 @@
 <!-- ═══════════════════════════════════════════════════════════════════════
      FLOATING GLASS NAVIGATION
      ═══════════════════════════════════════════════════════════════════════ -->
-<nav class="fixed top-3 left-1/2 -translate-x-1/2 z-40
+<nav class="dashboard-nav fixed top-3 left-1/2 -translate-x-1/2 z-40
             backdrop-blur-xl bg-white/[0.06] border border-white/[0.07]
             rounded-full px-1.5 py-1 flex items-center gap-0.5
-            shadow-[0_8px_32px_rgba(0,0,0,.4)]">
-  <button class="nav-pill active spring px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-tight" data-view="overview">
-    <iconify-icon icon="solar:chart-square-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>개요
+            shadow-[0_8px_32px_rgba(0,0,0,.4)]" aria-label="주요 화면">
+  <button class="nav-pill active spring px-3.5 py-1.5 rounded-full text-xs font-semibold tracking-tight" data-view="overview" aria-label="전체 현황 화면">
+    <iconify-icon icon="solar:chart-square-linear" width="15" class="nav-pill-icon"></iconify-icon>
+    <span class="nav-label">
+      <span class="nav-label-main">전체 현황</span>
+      <span class="nav-label-sub">오늘·누적</span>
+    </span>
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="explore">
-    <iconify-icon icon="solar:magnifer-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>탐색
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="explore" aria-label="작업 탐색 화면">
+    <iconify-icon icon="solar:magnifer-linear" width="15" class="nav-pill-icon"></iconify-icon>
+    <span class="nav-label">
+      <span class="nav-label-main">작업 탐색</span>
+      <span class="nav-label-sub">검색·세션·대화</span>
+    </span>
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="analysis">
-    <iconify-icon icon="solar:graph-up-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>분석
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="analysis" aria-label="사용 분석 화면">
+    <iconify-icon icon="solar:graph-up-linear" width="15" class="nav-pill-icon"></iconify-icon>
+    <span class="nav-label">
+      <span class="nav-label-main">사용 분석</span>
+      <span class="nav-label-sub">비용·모델·타임라인</span>
+    </span>
   </button>
-  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="admin">
-    <iconify-icon icon="solar:settings-linear" width="14" class="mr-1 align-[-2px]"></iconify-icon>관리
+  <button class="nav-pill spring px-3.5 py-1.5 rounded-full text-xs font-semibold text-white/40 hover:text-white/70" data-view="admin" aria-label="운영 관리 화면">
+    <iconify-icon icon="solar:settings-linear" width="15" class="nav-pill-icon"></iconify-icon>
+    <span class="nav-label">
+      <span class="nav-label-main">운영 관리</span>
+      <span class="nav-label-sub">백업·Wiki·노드</span>
+    </span>
   </button>
 
   <!-- WS badge -->
@@ -89,7 +105,10 @@
   <section class="dashboard-topbar anim-in" aria-label="대시보드 상태">
     <div class="dashboard-topbar-copy">
       <p class="dashboard-topbar-kicker">Codex dashboard</p>
-      <h1 class="dashboard-topbar-title">운영 상태와 탐색 흐름을 빠르게 읽는 화면입니다.</h1>
+      <h1 class="dashboard-topbar-title" aria-label="운영 상태와 탐색 흐름을 빠르게 읽는 화면입니다.">
+        <span class="dashboard-topbar-title-full" aria-hidden="true">운영 상태와 탐색 흐름을 빠르게 읽는 화면입니다.</span>
+        <span class="dashboard-topbar-title-compact" aria-hidden="true">운영 상태와 탐색 흐름</span>
+      </h1>
       <p class="dashboard-topbar-description">상단은 오늘 상태와 누적 규모만 보여주고, 아래에서 바로 세션 운영 데이터로 내려갑니다.</p>
       <div class="dashboard-topbar-signals" aria-label="주요 포인트">
         <span class="dashboard-signal-pill">
@@ -107,7 +126,7 @@
       </div>
       <div class="dashboard-status-card">
         <span class="dashboard-status-label">누적</span>
-        <strong id="hdrTotal" class="dashboard-status-value">전체: —</strong>
+        <strong id="hdrTotal" class="dashboard-status-value dashboard-status-value--total">전체: —</strong>
       </div>
       <div class="dashboard-status-card dashboard-status-card--build" aria-label="제품 정보">
         <span class="dashboard-status-label">Surface</span>
@@ -186,7 +205,26 @@
 <!-- ─── OVERVIEW ─── -->
 <section class="view" id="view-overview" data-view="overview">
   <div class="overview-console dashboard-surface dashboard-surface--overview anim-in">
-    <p class="overview-balance-line">운영 / 생산성 / 보고</p>
+    <div class="overview-axis-summary" aria-label="Overview 운영 축">
+      <div class="overview-axis-summary__copy">
+        <p class="overview-axis-summary__kicker">Overview flow</p>
+        <h2 class="overview-axis-summary__title">운영, 생산성, 보고 흐름을 한 화면에서 연결합니다.</h2>
+      </div>
+      <div class="overview-axis-summary__steps" aria-label="운영 생산성 보고">
+        <span class="overview-axis-step overview-axis-step--ops">
+          <span class="overview-axis-step__index">01</span>
+          운영
+        </span>
+        <span class="overview-axis-step overview-axis-step--productivity">
+          <span class="overview-axis-step__index">02</span>
+          생산성
+        </span>
+        <span class="overview-axis-step overview-axis-step--reporting">
+          <span class="overview-axis-step__index">03</span>
+          보고
+        </span>
+      </div>
+    </div>
     <div class="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
       <section id="overviewAxisGrid" class="overview-region" role="region" aria-labelledby="overviewAxisTitle">
         <div class="overview-region-head">
@@ -290,9 +328,11 @@
         <div id="overviewOpsPreviewBody" class="overview-region-body">
           <div class="overview-entry-shell">
             <div class="overview-entry-shell__head">
-              <div>
+              <div class="overview-entry-shell__copy">
                 <div class="overview-entry-shell__title">Top projects</div>
-                <div class="overview-entry-shell__sub">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</div>
+                <div class="overview-entry-shell__sub">
+                  <span class="overview-nowrap overview-entry-shell__hint">행 클릭 → 프로젝트 상세, 눈 버튼 → 마지막 대화 미리보기</span>
+                </div>
               </div>
               <button data-action="openCommandPalette" class="overview-entry-shell__action">명령 팔레트</button>
             </div>
@@ -857,7 +897,7 @@
                 <option value="">프리셋 선택…</option>
               </select>
               <button data-action="saveCurrentPreset" class="text-[10px] px-2 py-1 rounded-full bg-accent/10 text-accent border border-accent/25 hover:scale-[1.02] spring">+ 저장</button>
-              <button onclick="(()=>{const s=document.getElementById('presetSelect');if(s.value)deletePreset(s.value)})()" class="text-[10px] px-2 py-1 rounded-full text-white/40 hover:text-red-400 border border-white/[0.07] spring">✕</button>
+              <button data-action="deleteSelectedPreset" class="text-[10px] px-2 py-1 rounded-full text-white/40 hover:text-red-400 border border-white/[0.07] spring">✕</button>
             </div>
             <button data-action="clearAdvFilters" class="text-[10px] text-white/40 hover:text-red-400 spring">필터 초기화</button>
           </div>
@@ -1027,9 +1067,85 @@
         </div>
         <div class="flex items-center gap-2 mt-3">
           <button data-action="submitNodeRegister" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">등록</button>
-          <button onclick="document.getElementById('nodeRegisterForm').classList.add('hidden')" class="rounded-full px-3 py-1.5 text-[10px] font-semibold text-white/40 border border-white/[0.07] hover:text-white/60 spring">취소</button>
+          <button data-action="closeNodeRegister" class="rounded-full px-3 py-1.5 text-[10px] font-semibold text-white/40 border border-white/[0.07] hover:text-white/60 spring">취소</button>
         </div>
         <div id="nodeRegisterResult" class="mt-2 text-[10px] text-white/30"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Governance / Wiki -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d2">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div class="text-xs font-bold text-white/40">Governance / Wiki</div>
+            <div class="text-[10px] text-white/20 mt-0.5">codex-zone 프로젝트 레지스트리와 production wiki</div>
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap justify-end">
+            <button data-action="refreshGovernance" title="새로고침" class="text-[10px] text-white/40 hover:text-accent spring px-2 py-1 rounded-full border border-white/[0.07]">↻</button>
+            <button data-action="runGovernanceCheck" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-white/5 text-white/55 border border-white/[0.07] hover:text-white/80 spring">검사</button>
+            <button data-action="runGovernanceSync" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">동기화</button>
+            <button data-action="runGovernanceTrack" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:scale-[1.02] active:scale-[0.98] spring">추적</button>
+          </div>
+        </div>
+        <div class="mb-3 pb-3 border-b border-white/[0.05]">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <input id="govProjectId" placeholder="project-id"
+                   class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+            <input id="govProjectPath" placeholder="path (비우면 project-id)"
+                   class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+            <input id="govProjectTitle" placeholder="title"
+                   class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+            <select id="govProjectKind" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+              <option value="project">project</option>
+              <option value="governance">governance</option>
+              <option value="dashboard">dashboard</option>
+              <option value="terminal">terminal</option>
+              <option value="workflow">workflow</option>
+              <option value="compat">compat</option>
+            </select>
+          </div>
+          <textarea id="govProjectSummary" rows="2" placeholder="summary"
+                    class="mt-2 w-full bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring resize-none"></textarea>
+          <div class="mt-2 flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-3 text-[10px] text-white/45">
+              <label class="inline-flex items-center gap-1.5 cursor-pointer"><input id="govProjectWiki" type="checkbox" checked> wiki</label>
+              <label class="inline-flex items-center gap-1.5 cursor-pointer"><input id="govProjectClaudeCompat" type="checkbox"> CLAUDE</label>
+              <label class="inline-flex items-center gap-1.5 cursor-pointer"><input id="govProjectSyncAfter" type="checkbox" checked> sync</label>
+            </div>
+            <button data-action="addGovernanceProject" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:scale-[1.02] active:scale-[0.98] spring">프로젝트 등록</button>
+          </div>
+        </div>
+        <div id="governanceSummary" class="text-[11px]">
+          <div class="text-center text-white/15 text-xs py-4 dots">로딩 중</div>
+        </div>
+        <div id="governanceActionResult" class="mt-3 text-[10px] text-white/30"></div>
+      </div>
+    </div>
+    <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3">
+      <div class="bg-white/[0.02] rounded-bezel-inner shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <div class="text-xs font-bold text-white/40">Wiki Index</div>
+            <div class="text-[10px] text-white/20 mt-0.5">현재 production wiki 진입점</div>
+          </div>
+        </div>
+        <div id="governanceWikiIndex" class="text-[11px]">
+          <div class="text-center text-white/15 text-xs py-4 dots">로딩 중</div>
+        </div>
+        <div class="mt-4 pt-4 border-t border-white/[0.05]">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="text-xs font-bold text-white/40">Audit Latest</div>
+              <div class="text-[10px] text-white/20 mt-0.5">최근 zone tracking 리포트</div>
+            </div>
+          </div>
+          <div id="governanceAuditLatest" class="text-[11px]">
+            <div class="text-center text-white/15 text-xs py-4 dots">로딩 중</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1101,6 +1217,10 @@
             <option value="node_register">node_register</option>
             <option value="node_delete">node_delete</option>
             <option value="node_rotate_key">node_rotate_key</option>
+            <option value="governance_check">governance_check</option>
+            <option value="governance_sync">governance_sync</option>
+            <option value="governance_track">governance_track</option>
+            <option value="governance_project_add">governance_project_add</option>
           </select>
           <button data-action="refreshAudit" class="text-[10px] text-white/40 hover:text-accent spring px-2 py-1 rounded-full border border-white/[0.07]">↻</button>
         </div>
@@ -1120,7 +1240,7 @@
 <!-- Project Detail Modal (tabbed) -->
 <div id="projectModal" style="display:none" role="dialog" aria-modal="true"
      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-     onclick="if(event.target===this)closeProjectModal()">
+     data-backdrop-action="closeProjectModal">
   <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[1100px] max-w-[95vw] h-[88vh] flex flex-col shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
     <!-- Header -->
     <div class="flex items-start justify-between px-6 py-4 border-b border-white/[0.06] flex-shrink-0">
@@ -1152,7 +1272,7 @@
 
 <div id="planModal" style="display:none" role="dialog" aria-modal="true"
      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-     onclick="if(event.target===this)closePlanSettings()">
+     data-backdrop-action="closePlanSettings">
   <div class="bg-[#111] ring-1 ring-white/[0.08] rounded-2xl w-[420px] max-w-[92vw] max-h-[90vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,.5)] anim-in">
     <div class="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
       <span class="text-sm font-bold text-white/80">설정</span>
@@ -1227,7 +1347,7 @@
           <div class="text-xs font-semibold text-white/80">알림 허용</div>
           <div class="text-[10px] text-white/30">작업 완료 브라우저 알림</div>
         </div>
-        <button onclick="if('Notification' in window)Notification.requestPermission().then(p=>showToast('알림: '+p,{type:'info'}))" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">요청</button>
+        <button data-action="requestNotificationPermission" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-white/5 text-white/65 border border-white/[0.07] hover:scale-[1.02] spring">요청</button>
       </div>
       <div class="flex items-center justify-between">
         <div>
@@ -1242,7 +1362,7 @@
           <div class="text-xs font-semibold text-white/80">저장된 환경설정 초기화</div>
           <div class="text-[10px] text-white/30">정렬·필터·뷰 기본값 복원</div>
         </div>
-        <button onclick="if(confirm('모든 환경설정을 초기화합니다.')){localStorage.removeItem('codex-dashboard-prefs-v1');location.reload()}" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-red-500/10 text-red-400 border border-red-500/20 hover:scale-[1.02] spring">초기화</button>
+        <button data-action="resetDashboardPrefs" class="rounded-full px-4 py-1.5 text-[11px] font-bold bg-red-500/10 text-red-400 border border-red-500/20 hover:scale-[1.02] spring">초기화</button>
       </div>
       <div class="flex items-center justify-between">
         <div>
@@ -1266,7 +1386,7 @@
 
 <!-- Tag edit modal (replaces window.prompt for reliability) -->
 <div id="tagEditModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-     onclick="if(event.target===this)closeTagEdit()" role="dialog" aria-modal="true" aria-labelledby="tagEditTitle">
+     data-backdrop-action="closeTagEdit" role="dialog" aria-modal="true" aria-labelledby="tagEditTitle">
   <div class="bg-[#0f0f0f] ring-1 ring-cyan-500/25 rounded-2xl w-[440px] max-w-[94vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
     <div class="px-5 py-3 border-b border-cyan-500/20 bg-cyan-500/[0.06] flex items-center gap-2">
       <iconify-icon icon="solar:tag-linear" width="18" class="text-cyan-300"></iconify-icon>
@@ -1292,7 +1412,7 @@
 
 <!-- Delete confirmation modal (S1) — requires typing the name to enable the button -->
 <div id="deleteConfirmModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-     onclick="if(event.target===this)closeDeleteConfirm()" role="dialog" aria-modal="true" aria-labelledby="delConfirmTitle">
+     data-backdrop-action="closeDeleteConfirm" role="dialog" aria-modal="true" aria-labelledby="delConfirmTitle">
   <div class="bg-[#0f0f0f] ring-1 ring-red-500/25 rounded-2xl w-[460px] max-w-[94vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
     <div class="px-5 py-3 border-b border-red-500/20 bg-red-500/[0.06] flex items-center gap-2">
       <iconify-icon icon="solar:danger-triangle-bold" width="18" class="text-red-400"></iconify-icon>
@@ -1322,7 +1442,7 @@
 
 <!-- Command palette (Cmd+K) -->
 <div id="commandPalette" class="hidden fixed inset-0 z-50 flex items-start justify-center bg-black/70 backdrop-blur-sm pt-[12vh]"
-     onclick="if(event.target===this)closeCommandPalette()" role="dialog" aria-label="명령 팔레트">
+     data-backdrop-action="closeCommandPalette" role="dialog" aria-label="명령 팔레트">
   <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[640px] max-w-[92vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
     <div class="flex items-center gap-2 px-4 py-3 border-b border-white/[0.06]">
       <iconify-icon icon="solar:magnifer-linear" width="16" class="text-white/40"></iconify-icon>
@@ -1341,11 +1461,11 @@
 
 <!-- Keyboard shortcuts help overlay -->
 <div id="kbdHelp" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="키보드 단축키"
-     onclick="if(event.target===this)this.classList.add('hidden')">
+     data-backdrop-action="hideKbdHelp">
   <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[440px] max-w-[92vw] shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in overflow-hidden">
     <div class="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
       <span class="text-sm font-bold text-white/85">키보드 단축키</span>
-      <button onclick="document.getElementById('kbdHelp').classList.add('hidden')" class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
+      <button data-action="hideKbdHelp" class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
     </div>
     <div class="p-5 text-xs space-y-2">
       <div class="flex items-center justify-between"><span class="text-white/50">뷰 이동</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">g</kbd> → <kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">f/o/s/c/m/p/e</kbd></span></div>
@@ -1353,7 +1473,7 @@
       <div class="flex items-center justify-between"><span class="text-white/50">모달 닫기·검색 해제</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">Esc</kbd></span></div>
       <div class="flex items-center justify-between"><span class="text-white/50">도움말</span><span class="font-mono text-white/80"><kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/[0.08] text-[10px]">?</kbd></span></div>
       <div class="pt-2 text-[10px] text-white/30 border-t border-white/[0.05] mt-2 pt-3">
-        f=검색 · o=개요 · b=비용 · s=세션 · c=대화 · m=모델 · p=프로젝트 · u=Subagent · t=타임라인 · e=관리
+        f=메시지 검색 · o=전체 현황 · b=비용 분석 · s=세션 목록 · c=대화 뷰어 · m=모델 분석 · p=프로젝트 · u=Subagent · t=타임라인 · e=운영 관리
       </div>
     </div>
   </div>
@@ -1362,12 +1482,12 @@
 <!-- ═══════════════════════════════════════════════════════════════════════
      JAVASCRIPT
      ═══════════════════════════════════════════════════════════════════════ -->
-<!-- Filename-based cache busting: /static/app.v35.js, not ?v=30.
+<!-- Filename-based cache busting: /static/bundle.v91.js, not ?v=91.
      The server strips the .vNNN. segment before filesystem lookup. This is
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/bundle.v79.js" defer></script>
+<script src="/static/bundle.v91.js" defer></script>
 <script src="/static/subagents-codex.js" defer></script>
 </body>
 </html>

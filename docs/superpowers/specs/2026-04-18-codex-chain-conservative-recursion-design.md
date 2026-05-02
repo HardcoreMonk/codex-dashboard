@@ -1,5 +1,7 @@
 # Codex Chain Conservative Recursion Design
 
+> Current note (2026-04-30): This is a historical design record. Current runtime contracts are defined by `AGENTS.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, and `docs/SCHEMA.md`.
+
 ## Goal
 
 `/api/sessions/{session_id}/chain` must stop depending on legacy `sessions/messages` tables while preserving the existing response shape and avoiding invented parent-child links.

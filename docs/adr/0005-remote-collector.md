@@ -18,7 +18,7 @@
 ## 설계
 
 ```
-[원격] codex_collector.py → JSONL 감시 → POST /api/ingest (X-Ingest-Key) → [대시보드] process_record(source_node=node_id)
+[원격] codex_collector.py → JSONL 감시 → POST /api/ingest (X-Ingest-Key) → [대시보드] codex_parser.process_record(source_node=node_id)
 ```
 
 ## 근거
@@ -26,7 +26,7 @@
 - stdlib만 사용 — 원격 서버에 pip install 불필요
 - 실시간 push (5초 폴링) — rsync보다 빠른 반영
 - 방화벽 친화 (outbound HTTP만)
-- `sessions.source_node` 컬럼으로 노드별 격리/필터
+- `codex_sessions.source_node` 컬럼으로 노드별 격리/필터
 
 ## 트레이드오프
 

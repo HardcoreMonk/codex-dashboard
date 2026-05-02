@@ -99,7 +99,7 @@ async function bulkPin(pin) {
   if (state.bulkSelected.size === 0) return;
   const ids = [...state.bulkSelected];
   const results = await Promise.all(ids.map(sid =>
-    fetch(`/api/sessions/${encodeURIComponent(sid)}/pin`,
+    safeFetch(`/api/sessions/${encodeURIComponent(sid)}/pin`,
       { method: pin ? 'POST' : 'DELETE' })
       .then(() => true).catch(() => false)
   ));
@@ -186,12 +186,12 @@ function renderCompareModal(a, b) {
 
   const ov = document.createElement('div');
   ov.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4';
-  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
   ov.innerHTML = `
     <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[820px] max-w-[96vw] max-h-[90vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in">
       <div class="px-5 py-3 border-b border-white/[0.06] flex items-center justify-between sticky top-0 bg-[#0f0f0f]">
         <span class="text-sm font-bold text-white/85">세션 비교</span>
-        <button onclick="this.closest('.fixed').remove()" class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
+        <button data-action="removeClosestFixed" data-pass-el class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
       </div>
       <table class="w-full text-[12px]">
         <thead>
@@ -215,7 +215,7 @@ function bulkDelete() {
     message: `선택한 ${fmtN(ids.length)}개 세션이 영구 삭제됩니다. 복구할 수 없습니다.`,
     onConfirm: async () => {
       const results = await Promise.all(ids.map(sid =>
-        fetch(`/api/sessions/${encodeURIComponent(sid)}?confirm=true`, { method: 'DELETE' })
+        safeFetch(`/api/sessions/${encodeURIComponent(sid)}?confirm=true`, { method: 'DELETE' })
           .then(() => true).catch(() => false)
       ));
       const ok = results.filter(Boolean).length;
@@ -384,8 +384,7 @@ function renderSessionsThead(){
   document.getElementById('sessionsThead').innerHTML=`
     <tr class="text-[10px] text-white/35 uppercase tracking-widest border-b border-white/[0.05]">
       <th class="text-center px-3 py-2.5 font-bold w-8">
-        <input type="checkbox" id="bulkSelectAll" onclick="bulkToggleAll(this.checked)"
-               aria-label="전체 선택" class="cursor-pointer">
+        <input type="checkbox" id="bulkSelectAll" aria-label="전체 선택" class="cursor-pointer">
       </th>
       ${sortThHtml('sessions','project','프로젝트','text-left','px-5')}
       ${sortThHtml('sessions','model','모델','text-left hide-sm')}
@@ -397,6 +396,9 @@ function renderSessionsThead(){
       ${sortThHtml('sessions','updated_at','활동','text-right')}
       <th class="text-center px-3 py-2.5 font-bold text-white/35 w-16 hide-sm">관리</th>
     </tr>`;
+  document.getElementById('bulkSelectAll')?.addEventListener('click', (e) => {
+    bulkToggleAll(e.currentTarget.checked);
+  });
 }
 function renderSessions(data){
   const tb=document.getElementById('sessionsBody');tb.innerHTML='';
@@ -408,7 +410,7 @@ function renderSessions(data){
     if (_isRemoteNode) tr.style.background = 'rgba(34,211,238,.04)';
     tr.setAttribute('tabindex', '0');
     tr.setAttribute('role', 'row');
-    tr.onclick=()=>openConversation(s.id,s);
+    tr.addEventListener('click', () => openConversation(s.id, s));
     tr.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openConversation(s.id, s); }
       if (e.key === 'ArrowDown') { e.preventDefault(); const next = tr.nextElementSibling; if (next) next.focus(); }
@@ -441,9 +443,8 @@ function renderSessions(data){
     tr.setAttribute('data-sid', s.id);
     const checked = state.bulkSelected && state.bulkSelected.has(s.id) ? 'checked' : '';
     tr.innerHTML=`
-      <td class="px-3 py-3 text-center" onclick="event.stopPropagation()"${_isRemoteNode ? ' style="border-left:3px solid #22d3ee"' : ''}>
+      <td class="px-3 py-3 text-center" data-select-cell${_isRemoteNode ? ' style="border-left:3px solid #22d3ee"' : ''}>
         <input type="checkbox" data-bulk-sid="${esc(s.id)}" ${checked}
-               onclick="event.stopPropagation();bulkToggleOne('${esc(s.id)}',this.checked)"
                aria-label="선택" class="cursor-pointer">
       </td>
       <td class="px-5 py-3">
@@ -508,6 +509,11 @@ function renderSessions(data){
     actionTd.appendChild(pinBtn);
     actionTd.appendChild(tagBtn);
     actionTd.appendChild(delBtn);
+    tr.querySelector('[data-select-cell]')?.addEventListener('click', (e) => e.stopPropagation());
+    tr.querySelector('[data-bulk-sid]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      bulkToggleOne(s.id, e.currentTarget.checked);
+    });
     tb.appendChild(tr);
   });
   renderPagination(data.page,data.pages,data.total);
@@ -515,7 +521,7 @@ function renderSessions(data){
 function renderPagination(page,pages,total){
   const el=document.getElementById('sessionsPagination');el.innerHTML='';
   if(pages<=1){el.innerHTML=`<span class="text-[10px] text-white/15 ml-auto">${fmtN(total)} 세션</span>`;return;}
-  const mk=(t,p,dis)=>{const b=document.createElement('button');b.className='px-2 py-0.5 rounded text-[10px] font-semibold spring '+(p===page?'bg-accent/15 text-accent':'text-white/20 hover:text-white/40');b.textContent=t;b.disabled=dis;b.onclick=()=>loadSessions(p);return b;};
+  const mk=(t,p,dis)=>{const b=document.createElement('button');b.className='px-2 py-0.5 rounded text-[10px] font-semibold spring '+(p===page?'bg-accent/15 text-accent':'text-white/20 hover:text-white/40');b.textContent=t;b.disabled=dis;b.addEventListener('click',()=>loadSessions(p));return b;};
   el.appendChild(mk('‹',page-1,page<=1));
   for(let i=1;i<=pages;i++){if(pages>7&&i>2&&i<pages-1&&Math.abs(i-page)>1){if(i===3||i===pages-2){const s=document.createElement('span');s.textContent='…';s.className='text-white/10 text-[10px] px-1';el.appendChild(s);}continue;}el.appendChild(mk(i,i,false));}
   el.appendChild(mk('›',page+1,page>=pages));
@@ -563,7 +569,7 @@ async function openSessionReplay(sessionId, label) {
   const modal = document.createElement('div');
   modal.id = 'sessionReplayModal';
   modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4';
-  modal.onclick = (e) => { if (e.target === modal) _closeReplayModal(); };
+  modal.addEventListener('click', (e) => { if (e.target === modal) _closeReplayModal(); });
   modal.innerHTML = `
     <div class="bg-[#0f0f0f] ring-1 ring-white/[0.08] rounded-2xl w-[860px] max-w-[96vw] max-h-[88vh] overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,.6)] anim-in">
       <div class="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between gap-4">
@@ -571,7 +577,7 @@ async function openSessionReplay(sessionId, label) {
           <div class="text-sm font-bold text-white/90">세션 리플레이</div>
           <div class="text-[10px] text-white/35 mt-1">${esc(label || sessionId)}</div>
         </div>
-        <button onclick="_closeReplayModal()" class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
+        <button data-action="_closeReplayModal" class="text-white/30 hover:text-white/70 spring text-2xl leading-none">&times;</button>
       </div>
       <div id="sessionReplayPanel" class="p-5 space-y-3 max-h-[72vh] overflow-y-auto">
         <div class="text-center text-white/25 text-xs py-10 dots">리플레이 로딩 중</div>
@@ -607,13 +613,13 @@ async function openSessionReplay(sessionId, label) {
 async function deleteSession(sid, name) {
   const displayName = name || sid;
   try {
-    const pv = await fetch(`/api/sessions/${encodeURIComponent(sid)}`, { method: 'DELETE' }).then(r => r.json());
+    const pv = await safeFetch(`/api/sessions/${encodeURIComponent(sid)}`, { method: 'DELETE' });
     openDeleteConfirm({
       target: displayName,
       message: `이 세션과 ${fmtN(pv.message_count || 0)}건 메시지가 영구 삭제됩니다. 복구할 수 없습니다.`,
       onConfirm: async () => {
         try {
-          await fetch(`/api/sessions/${encodeURIComponent(sid)}?confirm=true`, { method: 'DELETE' });
+          await safeFetch(`/api/sessions/${encodeURIComponent(sid)}?confirm=true`, { method: 'DELETE' });
           loadSessions(); loadPeriods(); loadStats();
           showToast(`"${displayName}" 삭제 완료`, { type: 'success', duration: 2000 });
         } catch (e) {
@@ -628,8 +634,8 @@ async function deleteSession(sid, name) {
 }
 async function pinSession(sid, pin) {
   try {
-    if (pin) await fetch(`/api/sessions/${sid}/pin`, {method:'POST'});
-    else await fetch(`/api/sessions/${sid}/pin`, {method:'DELETE'});
+    if (pin) await safeFetch(`/api/sessions/${sid}/pin`, {method:'POST'});
+    else await safeFetch(`/api/sessions/${sid}/pin`, {method:'DELETE'});
     loadSessions();
     showToast(pin ? '핀 고정됨' : '핀 해제됨', { type: 'success', duration: 1500 });
   } catch(e) { console.error('pinSession:', e); showToast('핀 토글 실패', { type: 'error' }); }
@@ -673,11 +679,11 @@ async function submitTagEdit() {
     if (bulkIds && bulkIds.length) {
       // Bulk mode — apply the same tag string to every selected session
       const results = await Promise.all(bulkIds.map(id =>
-        fetch(`/api/sessions/${encodeURIComponent(id)}/tags`, {
+        safeFetch(`/api/sessions/${encodeURIComponent(id)}/tags`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tags: clean }),
-        }).then(r => r.ok).catch(() => false)
+        }).then(() => true).catch(() => false)
       ));
       const ok = results.filter(Boolean).length;
       const fail = results.length - ok;
@@ -688,12 +694,11 @@ async function submitTagEdit() {
       bulkClear();
       loadSessions();
     } else {
-      const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/tags`, {
+      await safeFetch(`/api/sessions/${encodeURIComponent(sid)}/tags`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tags: clean }),
       });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
       showToast(clean ? `태그 저장됨: ${clean}` : '태그 비움', { type: 'success', duration: 2400 });
       loadSessions();
     }
