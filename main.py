@@ -92,6 +92,8 @@ PROJECT_SYNC_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'project-sync.sh'
 WIKI_CHECK_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'wiki-check.sh'
 ZONE_AUDIT_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'zone-audit.sh'
 ZONE_TRACK_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'zone-track.sh'
+LIFECYCLE_REDESIGN_START_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'lifecycle-redesign-start.sh'
+LIFECYCLE_LINT_SCRIPT = GOVERNANCE_REPO_DIR / 'scripts' / 'lifecycle-lint.sh'
 _GOVERNANCE_REGISTRY_LOCK = threading.Lock()
 BACKUP_DIR = Path(
     os.environ.get(
@@ -3376,6 +3378,50 @@ def _trunc_governance_output(text: Optional[str], limit: int = 20000) -> str:
     return text[:limit] + f'\n... truncated {len(text) - limit} chars ...'
 
 
+def _validate_lifecycle_topic(topic: str) -> Optional[str]:
+    if not _LIFECYCLE_TOPIC_RE.fullmatch(topic):
+        return 'invalid lifecycle topic'
+    return None
+
+
+def _validate_lifecycle_run_id(run_id: str) -> Optional[str]:
+    if not _LIFECYCLE_RUN_ID_RE.fullmatch(run_id):
+        return 'invalid lifecycle run id'
+    return None
+
+
+def _parse_lifecycle_stdout(stdout: str, *, stream_name: str = 'stdout') -> tuple[Optional[dict], Optional[str]]:
+    text = stdout.strip()
+    if not text:
+        return None, f'{stream_name}: empty JSON output'
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return None, f'{stream_name}: invalid JSON output: {exc}'
+    if not isinstance(parsed, dict):
+        return None, f'{stream_name}: JSON output is not an object'
+    return parsed, None
+
+
+def _parse_lifecycle_streams(stdout: str, stderr: str) -> tuple[Optional[dict], Optional[str]]:
+    errors = []
+    if stdout.strip():
+        payload, error = _parse_lifecycle_stdout(stdout, stream_name='stdout')
+        if payload is not None:
+            return payload, None
+        errors.append(error)
+    else:
+        errors.append('stdout: empty JSON output')
+    if stderr.strip():
+        payload, error = _parse_lifecycle_stdout(stderr, stream_name='stderr')
+        if payload is not None:
+            return payload, None
+        errors.append(error)
+    else:
+        errors.append('stderr: empty JSON output')
+    return None, '; '.join(error for error in errors if error)
+
+
 def _run_governance_script(script: Path, *, timeout_s: int = 60) -> dict:
     allowed = {
         PROJECT_SYNC_SCRIPT.resolve(),
@@ -3441,6 +3487,182 @@ def _run_governance_script(script: Path, *, timeout_s: int = 60) -> dict:
         }
 
 
+def _run_lifecycle_script(script: Path, args: list[str], *, timeout_s: int = 90) -> dict:
+    allowed = {
+        LIFECYCLE_REDESIGN_START_SCRIPT.resolve(),
+        LIFECYCLE_LINT_SCRIPT.resolve(),
+    }
+    resolved = script.resolve()
+    command = ['bash', str(script), *args]
+    if resolved not in allowed:
+        return {
+            'ok': False,
+            'returncode': 126,
+            'script': str(script),
+            'command': command,
+            'stdout': '',
+            'stderr': 'script is not allowlisted',
+            'duration_ms': 0,
+            'payload': None,
+            'json_error': None,
+        }
+    if not script.exists():
+        return {
+            'ok': False,
+            'returncode': 127,
+            'script': str(script),
+            'command': command,
+            'stdout': '',
+            'stderr': 'script not found',
+            'duration_ms': 0,
+            'payload': None,
+            'json_error': None,
+        }
+
+    env = os.environ.copy()
+    env.update({
+        'ZONE_DIR': str(ZONE_ROOT),
+        'PROJECTS_FILE': str(PROJECTS_REGISTRY_PATH),
+        'WIKI_DIR': str(WIKI_DIR),
+        'RAW_DIR': str(RAW_DIR),
+    })
+    start = time.time()
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=str(GOVERNANCE_REPO_DIR),
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout_s,
+            check=False,
+        )
+        duration_ms = int((time.time() - start) * 1000)
+        payload, json_error = _parse_lifecycle_streams(proc.stdout, proc.stderr)
+        return {
+            'ok': proc.returncode == 0 and json_error is None,
+            'returncode': proc.returncode,
+            'script': str(script),
+            'command': command,
+            'stdout': _trunc_governance_output(proc.stdout),
+            'stderr': _trunc_governance_output(proc.stderr),
+            'duration_ms': duration_ms,
+            'payload': payload,
+            'json_error': json_error,
+        }
+    except subprocess.TimeoutExpired as e:
+        duration_ms = int((time.time() - start) * 1000)
+        return {
+            'ok': False,
+            'returncode': 124,
+            'script': str(script),
+            'command': command,
+            'stdout': _trunc_governance_output(e.stdout if isinstance(e.stdout, str) else ''),
+            'stderr': f'script timed out after {timeout_s} seconds',
+            'duration_ms': duration_ms,
+            'payload': None,
+            'json_error': None,
+        }
+
+
+def _read_lifecycle_run_file(repo: Path, path: Path) -> dict:
+    data = json.loads(path.read_text(encoding='utf-8'))
+    return {
+        'run_id': data.get('run_id') or path.stem,
+        'status': data.get('status'),
+        'date': data.get('date'),
+        'topic': data.get('topic'),
+        'generated_at': data.get('generated_at'),
+        'stages': data.get('stages', {}),
+        'artifacts': data.get('artifacts', {}),
+        'lint': data.get('lint', {}),
+        'relative_path': path.relative_to(repo).as_posix(),
+        'file': _path_meta(path),
+    }
+
+
+def _list_lifecycle_runs(repo: Path) -> list[dict]:
+    run_dir = repo / 'docs' / 'lifecycle' / 'runs'
+    if not run_dir.exists():
+        return []
+    runs = []
+    for path in sorted(run_dir.glob('*.json'), reverse=True):
+        if path.name.startswith('.'):
+            continue
+        try:
+            runs.append(_read_lifecycle_run_file(repo, path))
+        except Exception as exc:
+            runs.append({
+                'run_id': path.stem,
+                'relative_path': path.relative_to(repo).as_posix(),
+                'error': str(exc),
+                'file': _path_meta(path),
+            })
+    return runs
+
+
+def _lifecycle_single_payload_summary(result: dict) -> dict:
+    payload = result.get('payload') if isinstance(result.get('payload'), dict) else {}
+    lint = payload.get('lint') if isinstance(payload.get('lint'), dict) else {}
+    summary = payload.get('summary') if isinstance(payload.get('summary'), dict) else {}
+    errors = payload.get('errors') if isinstance(payload.get('errors'), list) else lint.get('errors', [])
+    warnings = payload.get('warnings') if isinstance(payload.get('warnings'), list) else lint.get('warnings', [])
+    return {
+        'run_id': payload.get('run_id'),
+        'created_count': len(payload.get('created_artifacts') or []),
+        'error_count': len(errors or []) if 'error_count' not in summary else summary.get('error_count', 0),
+        'warning_count': len(warnings or []) if 'warning_count' not in summary else summary.get('warning_count', 0),
+    }
+
+
+def _lifecycle_payload_summary(result: dict) -> dict:
+    combined = _lifecycle_single_payload_summary(result)
+    lint_result = result.get('lint')
+    if isinstance(lint_result, dict):
+        lint_summary = _lifecycle_single_payload_summary(lint_result)
+        if not combined.get('run_id'):
+            combined['run_id'] = lint_summary.get('run_id')
+        combined['created_count'] += lint_summary.get('created_count', 0)
+        combined['error_count'] += lint_summary.get('error_count', 0)
+        combined['warning_count'] += lint_summary.get('warning_count', 0)
+        if not lint_result.get('ok') and lint_summary.get('error_count', 0) == 0:
+            combined['error_count'] += 1
+    if result.get('lint_error'):
+        combined['error_count'] += 1
+    return combined
+
+
+def _audit_lifecycle_action(
+    action: str,
+    request: Optional[Request],
+    project_id: str,
+    topic: Optional[str],
+    result: dict,
+    *,
+    run_id: Optional[str] = None,
+) -> None:
+    summary = _lifecycle_payload_summary(result)
+    detail = {
+        'project_id': project_id,
+        'topic': topic,
+        'run_id': run_id or summary.get('run_id'),
+        'returncode': result.get('returncode'),
+        'duration_ms': result.get('duration_ms'),
+        'created_count': summary.get('created_count', 0),
+        'error_count': summary.get('error_count', 0),
+        'warning_count': summary.get('warning_count', 0),
+    }
+    if 'lint_ok' in result or 'lint_returncode' in result:
+        detail['lint_ok'] = result.get('lint_ok')
+        detail['lint_returncode'] = result.get('lint_returncode')
+    _audit(
+        action,
+        request,
+        status='ok' if result.get('ok') else 'error',
+        detail=detail,
+    )
+
+
 class GovernanceProjectCreate(BaseModel):
     id: str = Field(..., min_length=1, max_length=80)
     path: Optional[str] = Field(None, max_length=160)
@@ -3452,8 +3674,21 @@ class GovernanceProjectCreate(BaseModel):
     sync_after: bool = True
 
 
+class GovernanceLifecycleStartRequest(BaseModel):
+    project_id: str = Field(..., min_length=1, max_length=80)
+    topic: str = Field(..., min_length=1, max_length=120)
+    confirm: bool = False
+
+
+class GovernanceLifecycleLintRequest(BaseModel):
+    project_id: str = Field(..., min_length=1, max_length=80)
+    run_id: str = Field(..., min_length=1, max_length=160)
+
+
 _GOVERNANCE_PROJECT_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$')
 _GOVERNANCE_PROJECT_PATH_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_./-]{0,159}$')
+_LIFECYCLE_TOPIC_RE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+_LIFECYCLE_RUN_ID_RE = re.compile(r'^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*$')
 _GOVERNANCE_PROJECT_KINDS = {
     'project',
     'governance',
@@ -3497,6 +3732,36 @@ def _normalize_governance_project(payload: GovernanceProjectCreate) -> tuple[Opt
         'wiki': bool(payload.wiki),
         'claude_compat': bool(payload.claude_compat),
     }, None
+
+
+def _governance_project_by_id(project_id: str) -> Optional[dict]:
+    projects = _parse_governance_projects(PROJECTS_REGISTRY_PATH)
+    for project in projects:
+        if str(project.get('id')) == project_id:
+            return project
+    return None
+
+
+def _governance_project_repo(project: dict) -> Optional[Path]:
+    rel_path = str(project.get('path') or project.get('id') or '').strip()
+    if not rel_path:
+        return None
+    repo = (ZONE_ROOT / rel_path).resolve()
+    try:
+        repo.relative_to(ZONE_ROOT)
+    except ValueError:
+        return None
+    return repo
+
+
+def _require_governance_project(project_id: str) -> tuple[Optional[dict], Optional[Path], Optional[JSONResponse]]:
+    project = _governance_project_by_id(project_id)
+    if project is None:
+        return None, None, JSONResponse({'error': 'project not found'}, status_code=404)
+    repo = _governance_project_repo(project)
+    if repo is None:
+        return project, None, JSONResponse({'error': 'project path escapes zone root'}, status_code=400)
+    return project, repo, None
 
 
 def _governance_registry_value(value) -> str:
@@ -3675,6 +3940,116 @@ def api_governance_project_create(payload: GovernanceProjectCreate, request: Req
         },
     )
     return {'ok': True, 'project': project, 'sync': sync_result}
+
+
+@app.get("/api/governance/lifecycle/runs")
+def api_governance_lifecycle_runs(project_id: str = Query(..., min_length=1, max_length=80)):
+    project, repo, error = _require_governance_project(project_id)
+    if error:
+        return error
+    runs = _list_lifecycle_runs(repo)
+    return {
+        'project': {
+            'id': project.get('id'),
+            'path': project.get('path', project.get('id')),
+            'kind': project.get('kind'),
+            'repo': _path_meta(repo),
+        },
+        'runs': runs,
+        'summary': {
+            'run_count': len(runs),
+            'error_count': sum(1 for run in runs if run.get('error')),
+        },
+    }
+
+
+@app.post("/api/governance/lifecycle/preview")
+def api_governance_lifecycle_preview(payload: GovernanceLifecycleStartRequest, request: Request):
+    _project, _repo, error = _require_governance_project(payload.project_id)
+    if error:
+        return error
+    topic_error = _validate_lifecycle_topic(payload.topic)
+    if topic_error:
+        return JSONResponse({'error': topic_error}, status_code=400)
+    result = _run_lifecycle_script(
+        LIFECYCLE_REDESIGN_START_SCRIPT,
+        [payload.project_id, '--topic', payload.topic, '--json'],
+    )
+    _audit_lifecycle_action(
+        'governance_lifecycle_preview',
+        request,
+        payload.project_id,
+        payload.topic,
+        result,
+    )
+    return result
+
+
+@app.post("/api/governance/lifecycle/write")
+def api_governance_lifecycle_write(payload: GovernanceLifecycleStartRequest, request: Request):
+    _project, _repo, error = _require_governance_project(payload.project_id)
+    if error:
+        return error
+    if not payload.confirm:
+        return JSONResponse({'error': 'write confirmation required'}, status_code=400)
+    topic_error = _validate_lifecycle_topic(payload.topic)
+    if topic_error:
+        return JSONResponse({'error': topic_error}, status_code=400)
+    result = _run_lifecycle_script(
+        LIFECYCLE_REDESIGN_START_SCRIPT,
+        [payload.project_id, '--topic', payload.topic, '--write', '--json'],
+    )
+    run_id = None
+    if isinstance(result.get('payload'), dict):
+        run_id = result['payload'].get('run_id')
+    lint_result = None
+    lint_ok = None
+    if result.get('ok') and run_id and _validate_lifecycle_run_id(str(run_id)) is None:
+        lint_result = _run_lifecycle_script(
+            LIFECYCLE_LINT_SCRIPT,
+            [payload.project_id, '--run', str(run_id), '--json'],
+        )
+        lint_ok = bool(lint_result.get('ok'))
+        result['lint_returncode'] = lint_result.get('returncode')
+    elif result.get('ok'):
+        lint_ok = False
+        result['lint_error'] = 'valid lifecycle run_id required for post-write lint'
+    result['lint'] = lint_result
+    result['lint_ok'] = lint_ok
+    if result.get('ok') and lint_ok is not True:
+        result['ok'] = False
+    _audit_lifecycle_action(
+        'governance_lifecycle_write',
+        request,
+        payload.project_id,
+        payload.topic,
+        result,
+        run_id=run_id,
+    )
+    return result
+
+
+@app.post("/api/governance/lifecycle/lint")
+def api_governance_lifecycle_lint(payload: GovernanceLifecycleLintRequest, request: Request):
+    _project, _repo, error = _require_governance_project(payload.project_id)
+    if error:
+        return error
+    run_error = _validate_lifecycle_run_id(payload.run_id)
+    if run_error:
+        return JSONResponse({'error': run_error}, status_code=400)
+    result = _run_lifecycle_script(
+        LIFECYCLE_LINT_SCRIPT,
+        [payload.project_id, '--run', payload.run_id, '--json'],
+    )
+    _audit_lifecycle_action(
+        'governance_lifecycle_lint',
+        request,
+        payload.project_id,
+        None,
+        result,
+        run_id=payload.run_id,
+    )
+    return result
 
 
 def _db_storage_breakdown() -> dict:

@@ -924,6 +924,80 @@ def test_governance_lifecycle_preview_runs_json_script_and_audits(api_client, tm
     assert 'stderr' not in detail
 
 
+def test_governance_lifecycle_parses_payload_before_truncating_stdout(api_client, tmp_path, monkeypatch):
+    zone = _seed_governance_workspace(tmp_path, monkeypatch)
+    start_script = zone / 'codex-project-mgmt' / 'scripts' / 'lifecycle-redesign-start.sh'
+    start_script.write_text(
+        '''#!/usr/bin/env bash
+set -euo pipefail
+project="$1"
+shift
+topic=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --topic) topic="$2"; shift 2 ;;
+    --json) shift ;;
+    *) shift ;;
+  esac
+done
+padding="$(printf 'x%.0s' {1..21050})"
+run_id="2026-05-03-${topic}"
+printf '{"schema_version":1,"mode":"preview","target":{"project_id":"%s"},"run_id":"%s","padding":"%s","errors":[],"warnings":[],"exit_code":0}\\n' "$project" "$run_id" "$padding"
+''',
+        encoding='utf-8',
+    )
+    start_script.chmod(0o755)
+
+    r = api_client.post('/api/governance/lifecycle/preview', json={
+        'project_id': 'demo',
+        'topic': 'demo-redesign',
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body['ok'] is True
+    assert body['payload']['run_id'] == '2026-05-03-demo-redesign'
+    assert body['payload']['padding'].startswith('xxx')
+    assert 'truncated' in body['stdout']
+
+
+def test_governance_lifecycle_parses_json_failure_from_stderr(api_client, tmp_path, monkeypatch):
+    zone = _seed_governance_workspace(tmp_path, monkeypatch)
+    start_script = zone / 'codex-project-mgmt' / 'scripts' / 'lifecycle-redesign-start.sh'
+    start_script.write_text(
+        '''#!/usr/bin/env bash
+set -euo pipefail
+project="$1"
+shift
+topic=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --topic) topic="$2"; shift 2 ;;
+    --json) shift ;;
+    *) shift ;;
+  esac
+done
+run_id="2026-05-03-${topic}"
+printf '{"schema_version":1,"mode":"preview","target":{"project_id":"%s"},"run_id":"%s","errors":["preview failed"],"warnings":[],"exit_code":2}\\n' "$project" "$run_id" >&2
+exit 2
+''',
+        encoding='utf-8',
+    )
+    start_script.chmod(0o755)
+
+    r = api_client.post('/api/governance/lifecycle/preview', json={
+        'project_id': 'demo',
+        'topic': 'demo-redesign',
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body['ok'] is False
+    assert body['returncode'] == 2
+    assert body['payload']['errors'] == ['preview failed']
+    assert body['json_error'] is None
+
+
 def test_governance_lifecycle_write_requires_confirm(api_client, tmp_path, monkeypatch):
     _seed_governance_workspace(tmp_path, monkeypatch)
 
@@ -959,6 +1033,51 @@ def test_governance_lifecycle_write_runs_lint_after_script(api_client, tmp_path,
     detail = audit.json()['entries'][0]['detail']
     assert detail['created_count'] == 1
     assert detail['error_count'] == 0
+
+
+def test_governance_lifecycle_write_folds_failed_auto_lint_into_result_and_audit(api_client, tmp_path, monkeypatch):
+    zone = _seed_governance_workspace(tmp_path, monkeypatch)
+    lint_script = zone / 'codex-project-mgmt' / 'scripts' / 'lifecycle-lint.sh'
+    lint_script.write_text(
+        '''#!/usr/bin/env bash
+set -euo pipefail
+project="$1"
+shift
+run_id=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --run) run_id="$2"; shift 2 ;;
+    --json) shift ;;
+    *) shift ;;
+  esac
+done
+printf '{"schema_version":1,"target":{"project_id":"%s"},"runs":[{"run_id":"%s","errors":["lint failed"],"warnings":["lint warning"],"exit_code":1}],"summary":{"run_count":1,"error_count":1,"warning_count":1},"errors":["lint failed"],"warnings":["lint warning"],"exit_code":1}\\n' "$project" "$run_id"
+exit 1
+''',
+        encoding='utf-8',
+    )
+    lint_script.chmod(0o755)
+
+    r = api_client.post('/api/governance/lifecycle/write', json={
+        'project_id': 'demo',
+        'topic': 'demo-redesign',
+        'confirm': True,
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body['ok'] is False
+    assert body['lint_ok'] is False
+    assert body['lint']['returncode'] == 1
+    assert body['lint']['payload']['summary']['error_count'] == 1
+
+    audit = api_client.get('/api/admin/audit?action=governance_lifecycle_write')
+    assert audit.status_code == 200
+    entry = audit.json()['entries'][0]
+    assert entry['status'] == 'error'
+    assert entry['detail']['error_count'] > 0
+    assert 'stdout' not in entry['detail']
+    assert 'stderr' not in entry['detail']
 
 
 def test_governance_lifecycle_lint_runs_json_script_and_audits(api_client, tmp_path, monkeypatch):
@@ -1000,6 +1119,26 @@ def test_governance_lifecycle_rejects_invalid_project_topic_and_run_id(api_clien
         'run_id': '../escape',
     })
     assert bad_run.status_code == 400
+
+
+def test_governance_lifecycle_rejects_registered_project_path_that_escapes_zone_root(api_client, tmp_path, monkeypatch):
+    zone = _seed_governance_workspace(tmp_path, monkeypatch)
+    projects = zone / 'projects.yaml'
+    projects.write_text(
+        projects.read_text(encoding='utf-8') + '\n'.join([
+            '  - id: escape-demo',
+            '    path: ../escape-demo',
+            '    title: Escape Demo',
+            '    kind: governance',
+            '    wiki: true',
+        ]) + '\n',
+        encoding='utf-8',
+    )
+
+    r = api_client.get('/api/governance/lifecycle/runs', params={'project_id': 'escape-demo'})
+
+    assert r.status_code == 400
+    assert r.json()['error'] == 'project path escapes zone root'
 
 
 def test_governance_lifecycle_api_denied_without_login_when_password_set(auth_api_client):
