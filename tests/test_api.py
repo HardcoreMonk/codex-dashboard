@@ -901,7 +901,7 @@ def test_governance_lifecycle_lists_project_runs(api_client, tmp_path, monkeypat
 
 
 def test_governance_lifecycle_preview_runs_json_script_and_audits(api_client, tmp_path, monkeypatch):
-    _seed_governance_workspace(tmp_path, monkeypatch)
+    zone = _seed_governance_workspace(tmp_path, monkeypatch)
 
     r = api_client.post('/api/governance/lifecycle/preview', json={
         'project_id': 'demo',
@@ -913,6 +913,8 @@ def test_governance_lifecycle_preview_runs_json_script_and_audits(api_client, tm
     assert body['ok'] is True
     assert body['payload']['mode'] == 'preview'
     assert body['payload']['run_id'] == '2026-05-03-demo-redesign'
+    assert '--zone-dir' in body['command']
+    assert str(zone.resolve()) in body['command']
     assert '--write' not in body['command']
 
     audit = api_client.get('/api/admin/audit?action=governance_lifecycle_preview')
@@ -1139,6 +1141,23 @@ def test_governance_lifecycle_rejects_registered_project_path_that_escapes_zone_
 
     assert r.status_code == 400
     assert r.json()['error'] == 'project path escapes zone root'
+
+
+def test_governance_lifecycle_rejects_nonstandard_registry_before_script(api_client, tmp_path, monkeypatch):
+    import main
+
+    zone = _seed_governance_workspace(tmp_path, monkeypatch)
+    custom_registry = zone / 'custom-projects.yaml'
+    custom_registry.write_text((zone / 'projects.yaml').read_text(encoding='utf-8'), encoding='utf-8')
+    monkeypatch.setattr(main, 'PROJECTS_REGISTRY_PATH', custom_registry.resolve())
+
+    r = api_client.post('/api/governance/lifecycle/preview', json={
+        'project_id': 'demo',
+        'topic': 'demo-redesign',
+    })
+
+    assert r.status_code == 400
+    assert r.json()['error'] == 'lifecycle requires CODEX_PROJECTS_REGISTRY under CODEX_ZONE_ROOT'
 
 
 def test_governance_lifecycle_api_denied_without_login_when_password_set(auth_api_client):

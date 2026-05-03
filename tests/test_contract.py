@@ -147,8 +147,10 @@ def test_contract_codex_service_unit_exists_with_codex_identity():
     assert 'Description=Codex Web Dashboard' in contents
     assert 'Environment=PORT=8617' in contents or '--port 8617' in contents
     assert 'SyslogIdentifier=codex-web-dashboard' in contents
-    assert 'EnvironmentFile=-/home/hardcoremonk/projects/codex-zone/codex-dashboard/.env' in contents
+    assert 'EnvironmentFile=-/data/projects/codex-zone/codex-dashboard/.env' in contents
     assert 'Environment=PYTHONDONTWRITEBYTECODE=1' in contents
+    assert 'ProtectSystem=strict' in contents
+    assert 'ReadWritePaths=/home/hardcoremonk/.codex /data/projects/codex-zone' in contents
     assert '__pycache__' not in contents
 
 

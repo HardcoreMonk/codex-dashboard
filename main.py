@@ -3565,6 +3565,20 @@ def _run_lifecycle_script(script: Path, args: list[str], *, timeout_s: int = 90)
         }
 
 
+def _lifecycle_script_args(project_id: str, args: list[str]) -> list[str]:
+    return [project_id, '--zone-dir', str(ZONE_ROOT), *args]
+
+
+def _lifecycle_registry_error() -> Optional[JSONResponse]:
+    default_registry = (ZONE_ROOT / 'projects.yaml').resolve()
+    if PROJECTS_REGISTRY_PATH.resolve() == default_registry:
+        return None
+    return JSONResponse(
+        {'error': 'lifecycle requires CODEX_PROJECTS_REGISTRY under CODEX_ZONE_ROOT'},
+        status_code=400,
+    )
+
+
 def _read_lifecycle_run_file(repo: Path, path: Path) -> dict:
     data = json.loads(path.read_text(encoding='utf-8'))
     return {
@@ -3968,12 +3982,15 @@ def api_governance_lifecycle_preview(payload: GovernanceLifecycleStartRequest, r
     _project, _repo, error = _require_governance_project(payload.project_id)
     if error:
         return error
+    registry_error = _lifecycle_registry_error()
+    if registry_error:
+        return registry_error
     topic_error = _validate_lifecycle_topic(payload.topic)
     if topic_error:
         return JSONResponse({'error': topic_error}, status_code=400)
     result = _run_lifecycle_script(
         LIFECYCLE_REDESIGN_START_SCRIPT,
-        [payload.project_id, '--topic', payload.topic, '--json'],
+        _lifecycle_script_args(payload.project_id, ['--topic', payload.topic, '--json']),
     )
     _audit_lifecycle_action(
         'governance_lifecycle_preview',
@@ -3990,14 +4007,27 @@ def api_governance_lifecycle_write(payload: GovernanceLifecycleStartRequest, req
     _project, _repo, error = _require_governance_project(payload.project_id)
     if error:
         return error
+    registry_error = _lifecycle_registry_error()
+    if registry_error:
+        return registry_error
     if not payload.confirm:
+        _audit(
+            'governance_lifecycle_write',
+            request,
+            status='error',
+            detail={
+                'project_id': payload.project_id,
+                'topic': payload.topic,
+                'error': 'write confirmation required',
+            },
+        )
         return JSONResponse({'error': 'write confirmation required'}, status_code=400)
     topic_error = _validate_lifecycle_topic(payload.topic)
     if topic_error:
         return JSONResponse({'error': topic_error}, status_code=400)
     result = _run_lifecycle_script(
         LIFECYCLE_REDESIGN_START_SCRIPT,
-        [payload.project_id, '--topic', payload.topic, '--write', '--json'],
+        _lifecycle_script_args(payload.project_id, ['--topic', payload.topic, '--write', '--json']),
     )
     run_id = None
     if isinstance(result.get('payload'), dict):
@@ -4007,7 +4037,7 @@ def api_governance_lifecycle_write(payload: GovernanceLifecycleStartRequest, req
     if result.get('ok') and run_id and _validate_lifecycle_run_id(str(run_id)) is None:
         lint_result = _run_lifecycle_script(
             LIFECYCLE_LINT_SCRIPT,
-            [payload.project_id, '--run', str(run_id), '--json'],
+            _lifecycle_script_args(payload.project_id, ['--run', str(run_id), '--json']),
         )
         lint_ok = bool(lint_result.get('ok'))
         result['lint_returncode'] = lint_result.get('returncode')
@@ -4034,12 +4064,15 @@ def api_governance_lifecycle_lint(payload: GovernanceLifecycleLintRequest, reque
     _project, _repo, error = _require_governance_project(payload.project_id)
     if error:
         return error
+    registry_error = _lifecycle_registry_error()
+    if registry_error:
+        return registry_error
     run_error = _validate_lifecycle_run_id(payload.run_id)
     if run_error:
         return JSONResponse({'error': run_error}, status_code=400)
     result = _run_lifecycle_script(
         LIFECYCLE_LINT_SCRIPT,
-        [payload.project_id, '--run', payload.run_id, '--json'],
+        _lifecycle_script_args(payload.project_id, ['--run', payload.run_id, '--json']),
     )
     _audit_lifecycle_action(
         'governance_lifecycle_lint',

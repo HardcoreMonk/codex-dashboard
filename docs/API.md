@@ -255,6 +255,7 @@ Linux `codex-zone`의 project registry, production wiki, raw snapshot 자동화�
 - 중복 `id` 또는 중복 `path`는 `409`로 거부한다.
 - 스크립트 실행은 `project-sync.sh`, `wiki-check.sh`, `zone-track.sh`만 allowlist한다.
 - lifecycle script 실행은 별도 allowlist로 `lifecycle-redesign-start.sh`, `lifecycle-lint.sh`만 허용한다.
+- lifecycle script는 dashboard의 `CODEX_ZONE_ROOT`를 `--zone-dir`로 명시해 dashboard 검증과 script target resolution을 같은 zone 기준으로 맞춘다. 현재 lifecycle 실행은 `CODEX_PROJECTS_REGISTRY=$CODEX_ZONE_ROOT/projects.yaml` 형태만 지원한다.
 - lifecycle write는 등록된 project만 대상으로 하며 `confirm: true` 없이는 거부한다.
 - lifecycle 감사 로그는 project id, topic, run id, return code, duration, created/error/warning count 같은 summary만 저장하고 전체 stdout/stderr는 저장하지 않는다.
 - `project-sync.sh`, `wiki-check.sh` 실행 제한 시간은 60초, `zone-track.sh`는 180초이며 stdout/stderr는 잘라서 응답한다.

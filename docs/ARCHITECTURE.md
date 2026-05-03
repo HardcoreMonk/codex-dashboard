@@ -390,7 +390,11 @@ RestartSec=5s
 MemoryMax=512M
 CPUQuota=150%
 ProtectSystem=strict
+ReadWritePaths=/home/hardcoremonk/.codex /data/projects/codex-zone
 ```
+
+`/data/projects/codex-zone` 쓰기 권한은 Governance / Wiki lifecycle redesign write가
+project-local `docs/` 산출물을 생성하기 위해 필요하다.
 
 ### DR (재해 복구)
 

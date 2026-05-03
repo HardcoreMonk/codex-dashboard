@@ -29,12 +29,12 @@ CPUQuota=150%
 TasksMax=256
 LimitNOFILE=8192
 
-# Hardening — read-only filesystem except for the Codex state dir.
+# Hardening — read-only filesystem except for Codex state and managed zone writes.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/hardcoremonk/.codex
+ReadWritePaths=/home/hardcoremonk/.codex /data/projects/codex-zone
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

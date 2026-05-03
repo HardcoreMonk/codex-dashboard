@@ -69,6 +69,7 @@ sudo systemctl enable --now codex-web-dashboard
 
 - `codex-web-dashboard.service` → `PORT=8617`, `DASHBOARD_DB_PATH=~/.codex/dashboard.db`, `DASHBOARD_BACKUP_DIR=~/.codex/dashboard-backups`
 - `codex-web-dashboard.service` 는 저장소 루트의 `.env` 를 선택적으로 읽고, `PYTHONDONTWRITEBYTECODE=1` 로 바이트코드 쓰기를 끈다.
+- lifecycle redesign write 기능 때문에 systemd hardening의 `ReadWritePaths`는 `~/.codex`와 `/data/projects/codex-zone`을 모두 허용한다. service 파일을 갱신한 뒤에는 `sudo systemctl daemon-reload && sudo systemctl restart codex-web-dashboard`를 실행한다.
 
 ### 테스트 & 빌드
 

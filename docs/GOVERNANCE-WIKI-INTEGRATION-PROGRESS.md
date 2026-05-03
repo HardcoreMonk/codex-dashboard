@@ -96,7 +96,7 @@
   - Lifecycle write
   - Lifecycle lint
 - 감사 로그 필터에 `governance_check`, `governance_sync`, `governance_track`, `governance_project_add`, `governance_lifecycle_preview`, `governance_lifecycle_write`, `governance_lifecycle_lint`를 추가했다.
-- `index.html` cache busting 버전은 현재 `v91`이다.
+- `index.html` cache busting 버전은 현재 `v92`다.
 
 ## 변경 파일 (2026-05-03 lifecycle slice)
 
@@ -107,7 +107,9 @@
 - `tests/test_e2e_smoke.py`
 - `docs/GOVERNANCE-WIKI-INTEGRATION-PROGRESS.md`
 - `docs/API.md`
+- `docs/ARCHITECTURE.md`
 - `README.md`
+- `codex-web-dashboard.service`
 
 ## 검증 결과
 
@@ -181,7 +183,6 @@ git diff --check -- docs/API.md docs/GOVERNANCE-WIKI-INTEGRATION-PROGRESS.md REA
 
 ## 알려진 잔여 사항
 
-- repo 전체 `git diff --check`는 기존 변경분인 `docs/adr/0004-esbuild-bundle.md:3`의 trailing whitespace 때문에 실패한다. 이번 통합 변경 파일의 whitespace 문제는 없다.
 - 현재 UI는 wiki index 미리보기 중심이다. 개별 wiki 페이지 탐색/편집 기능은 아직 없다.
 - `projects.yaml` 전체 편집 기능은 없다. 현재는 신규 프로젝트 append만 지원한다.
 - 스크립트 실행 결과는 일회성 표시와 감사 로그에만 남는다. 별도 실행 히스토리 테이블은 없다.
