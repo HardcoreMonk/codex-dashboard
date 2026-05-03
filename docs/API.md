@@ -1,6 +1,6 @@
 # REST API
 
-애플리케이션 정의 기준 90 HTTP routes + 1 WebSocket. FastAPI 자동 문서 route(`/docs`, `/redoc`, `/openapi.json`, OAuth redirect)를 포함하면 HTTP route는 94개다. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/`, `/static/*`, `/login`, `/features`, `/landing/ops`, `/landing/team`, `/landing/executive`, `/api/auth/login`, `/api/auth/me`, `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py` 는 인증 우회.
+애플리케이션 정의 기준 94 HTTP routes + 1 WebSocket. FastAPI 자동 문서 route(`/docs`, `/redoc`, `/openapi.json`, OAuth redirect)를 포함하면 HTTP route는 98개다. 인증은 `DASHBOARD_PASSWORD` 설정 시 쿠키 기반 세션 (`dash_session`). `/`, `/static/*`, `/login`, `/features`, `/landing/ops`, `/landing/team`, `/landing/executive`, `/api/auth/login`, `/api/auth/me`, `/api/health`, `/metrics`, `/api/ingest`, `/api/codex-collector.py` 는 인증 우회.
 
 프로젝트 기준과 문서 우선순위는 `AGENTS.md`를 따른다. 이 문서는 인터페이스 계약과 호출 예시에 집중한다.
 
@@ -200,6 +200,10 @@ Linux `codex-zone`의 project registry, production wiki, raw snapshot 자동화�
 | POST | `/api/governance/sync` | allowlist된 `scripts/project-sync.sh` 실행. 감사 `action=governance_sync` |
 | POST | `/api/governance/track` | allowlist된 `scripts/zone-track.sh` 실행. sync/check/audit를 한 번에 수행하고 감사 `action=governance_track` |
 | POST | `/api/governance/projects` | 신규 project를 `projects.yaml`에 append하고 선택적으로 sync 실행. 감사 `action=governance_project_add` |
+| GET | `/api/governance/lifecycle/runs?project_id=<id>` | 등록된 project의 `docs/lifecycle/runs/*.json` snapshot 목록 조회 |
+| POST | `/api/governance/lifecycle/preview` | `lifecycle-redesign-start.sh <project_id> --topic <topic> --json` 실행. write 없이 preview하고 감사 `action=governance_lifecycle_preview` |
+| POST | `/api/governance/lifecycle/write` | `confirm: true` 필요. `lifecycle-redesign-start.sh <project_id> --topic <topic> --write --json` 실행 후 같은 run id를 lint하고 감사 `action=governance_lifecycle_write` |
+| POST | `/api/governance/lifecycle/lint` | `lifecycle-lint.sh <project_id> --run <run_id> --json` 실행. 감사 `action=governance_lifecycle_lint` |
 
 `POST /api/governance/projects` body:
 
@@ -215,6 +219,34 @@ Linux `codex-zone`의 project registry, production wiki, raw snapshot 자동화�
 }
 ```
 
+`POST /api/governance/lifecycle/preview` body:
+
+```json
+{
+  "project_id": "codex-dashboard",
+  "topic": "governance-lifecycle-runs"
+}
+```
+
+`POST /api/governance/lifecycle/write` body:
+
+```json
+{
+  "project_id": "codex-dashboard",
+  "topic": "governance-lifecycle-runs",
+  "confirm": true
+}
+```
+
+`POST /api/governance/lifecycle/lint` body:
+
+```json
+{
+  "project_id": "codex-dashboard",
+  "run_id": "2026-05-03-governance-lifecycle-runs"
+}
+```
+
 제약:
 
 - `id`는 `[A-Za-z0-9][A-Za-z0-9_.-]{0,79}` 형식.
@@ -222,6 +254,9 @@ Linux `codex-zone`의 project registry, production wiki, raw snapshot 자동화�
 - `wiki`는 registry의 wiki 생성/동기화 여부를 지정한다.
 - 중복 `id` 또는 중복 `path`는 `409`로 거부한다.
 - 스크립트 실행은 `project-sync.sh`, `wiki-check.sh`, `zone-track.sh`만 allowlist한다.
+- lifecycle script 실행은 별도 allowlist로 `lifecycle-redesign-start.sh`, `lifecycle-lint.sh`만 허용한다.
+- lifecycle write는 등록된 project만 대상으로 하며 `confirm: true` 없이는 거부한다.
+- lifecycle 감사 로그는 project id, topic, run id, return code, duration, created/error/warning count 같은 summary만 저장하고 전체 stdout/stderr는 저장하지 않는다.
 - `project-sync.sh`, `wiki-check.sh` 실행 제한 시간은 60초, `zone-track.sh`는 180초이며 stdout/stderr는 잘라서 응답한다.
 
 ## 원격 노드 수집

@@ -134,7 +134,7 @@ INGEST_KEY=<key> python3 codex_collector.py --url http://dashboard:8617 --node-i
 ### 관리자 (Admin)
 - **대시보드 상태**: 가동시간, 스키마 버전, DB/WAL 크기, 세션·메시지·subagent·원격노드 카운트, Codex ingest 상태 (`source_kind=codex`, `indexed_sessions`, `indexed_messages`), Watcher 상태·큐
 - **보존 스케줄**: 내장 asyncio 스케줄러 (enable/interval/days), 마지막·다음 실행 시각 표시
-- **Governance / Wiki**: `codex-zone/projects.yaml` 신규 project 등록, production wiki index와 최신 audit 리포트 미리보기, `project-sync.sh`/`wiki-check.sh`/`zone-track.sh` 실행
+- **Governance / Wiki**: `codex-zone/projects.yaml` 신규 project 등록, production wiki index와 최신 audit 리포트 미리보기, `project-sync.sh`/`wiki-check.sh`/`zone-track.sh` 실행, 기존 project lifecycle redesign run preview/write/lint
 - **감사 로그**: 모든 관리자 액션(backup/retention/node_/governance_*)을 IP·상태·상세 JSON과 함께 기록·필터 조회
 - **백업·복원·보존**: `sqlite3.backup()` 기반 일관 백업 (10개 로테이션), 보존 preview → confirm
 
