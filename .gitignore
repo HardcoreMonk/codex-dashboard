@@ -46,3 +46,5 @@ dashboard.db
 .gstack/
 .superpowers/
 docs/superpowers/plans/
+!docs/superpowers/plans/
+!docs/superpowers/plans/*.md
