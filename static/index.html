@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&display=swap">
 
 <!-- Tailwind CSS (built from app.css via build.js) -->
-<link rel="stylesheet" href="/static/tailwind.v91.css">
+<link rel="stylesheet" href="/static/tailwind.v92.css">
 
 <!-- Pretendard (Korean) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
@@ -1122,6 +1122,26 @@
           <div class="text-center text-white/15 text-xs py-4 dots">로딩 중</div>
         </div>
         <div id="governanceActionResult" class="mt-3 text-[10px] text-white/30"></div>
+        <div class="mt-4 pt-4 border-t border-white/[0.05]">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <div class="text-xs font-bold text-white/40">Lifecycle Runs</div>
+              <div class="text-[10px] text-white/20 mt-0.5">기존 프로젝트 재설계 run 생성과 lint</div>
+            </div>
+            <button data-action="refreshGovernanceLifecycle" title="Lifecycle 새로고침" class="text-[10px] text-white/40 hover:text-accent spring px-2 py-1 rounded-full border border-white/[0.07]">↻</button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto_auto] gap-2">
+            <select id="govLifecycleProject" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring"></select>
+            <input id="govLifecycleTopic" placeholder="topic-kebab-case" class="bg-white/5 border border-white/[0.07] rounded-lg px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-accent/30 spring">
+            <button data-action="previewGovernanceLifecycle" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-white/5 text-white/55 border border-white/[0.07] hover:text-white/80 spring">Preview</button>
+            <button data-action="writeGovernanceLifecycle" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-amber-500/10 text-amber-200 border border-amber-500/20 hover:scale-[1.02] active:scale-[0.98] spring">Write</button>
+            <button data-action="lintGovernanceLifecycle" class="rounded-full px-3 py-1.5 text-[10px] font-semibold bg-accent/10 text-accent border border-accent/20 hover:scale-[1.02] active:scale-[0.98] spring">Lint</button>
+          </div>
+          <div id="governanceLifecycleRuns" class="mt-3 text-[11px]">
+            <div class="text-center text-white/15 text-xs py-4">프로젝트를 선택하세요</div>
+          </div>
+          <div id="governanceLifecycleResult" class="mt-3 text-[10px] text-white/30"></div>
+        </div>
       </div>
     </div>
     <div class="bg-white/5 ring-1 ring-white/[0.07] p-1 rounded-bezel anim-in anim-d3">
@@ -1221,6 +1241,9 @@
             <option value="governance_sync">governance_sync</option>
             <option value="governance_track">governance_track</option>
             <option value="governance_project_add">governance_project_add</option>
+            <option value="governance_lifecycle_preview">governance_lifecycle_preview</option>
+            <option value="governance_lifecycle_write">governance_lifecycle_write</option>
+            <option value="governance_lifecycle_lint">governance_lifecycle_lint</option>
           </select>
           <button data-action="refreshAudit" class="text-[10px] text-white/40 hover:text-accent spring px-2 py-1 rounded-full border border-white/[0.07]">↻</button>
         </div>
@@ -1482,12 +1505,12 @@
 <!-- ═══════════════════════════════════════════════════════════════════════
      JAVASCRIPT
      ═══════════════════════════════════════════════════════════════════════ -->
-<!-- Filename-based cache busting: /static/bundle.v91.js, not ?v=91.
+<!-- Filename-based cache busting: /static/bundle.v92.js, not ?v=92.
      The server strips the .vNNN. segment before filesystem lookup. This is
      robust against proxies/CDNs that drop query strings from cache keys.
      Module load order matters: app.js defines state/utils/safeFetch first,
      then feature modules (plan/overview/subagents/charts) consume those globals. -->
-<script src="/static/bundle.v91.js" defer></script>
+<script src="/static/bundle.v92.js" defer></script>
 <script src="/static/subagents-codex.js" defer></script>
 </body>
 </html>

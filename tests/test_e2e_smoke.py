@@ -724,8 +724,19 @@ def test_frontend_event_and_fetch_contracts_are_hardened():
     assert "await safeFetch('/api/auth/logout', { method: 'POST' });" in app_js
     assert "const d = await safeFetch('/api/auth/me');" in app_js
 
+    allowed_fetches = (
+        'fetch(url, { ...options, signal: ctrl.signal })',
+        """fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })""",
+    )
     for js in (app_js, sessions_js, plan_js):
-        assert 'fetch(' not in js.replace('fetch(url, { ...options, signal: ctrl.signal })', '')
+        checked = js
+        for allowed in allowed_fetches:
+            checked = checked.replace(allowed, '')
+        assert 'fetch(' not in checked
 
     for snippet in [
         "safeFetch('/api/admin/retention/schedule', {",
@@ -734,6 +745,74 @@ def test_frontend_event_and_fetch_contracts_are_hardened():
         "safeFetch('/api/plan/config', {",
     ]:
         assert snippet in app_js + sessions_js + plan_js
+
+
+def test_governance_lifecycle_controls_and_handlers_are_present(e2e_client):
+    html = e2e_client.get('/app').text
+    app_js = Path('static/app.js').read_text()
+
+    for marker in (
+        'Lifecycle Runs',
+        'id="govLifecycleProject"',
+        'id="govLifecycleTopic"',
+        'data-action="refreshGovernanceLifecycle"',
+        'data-action="previewGovernanceLifecycle"',
+        'data-action="writeGovernanceLifecycle"',
+        'data-action="lintGovernanceLifecycle"',
+        'id="governanceLifecycleRuns"',
+        'id="governanceLifecycleResult"',
+        'value="governance_lifecycle_preview"',
+        'value="governance_lifecycle_write"',
+        'value="governance_lifecycle_lint"',
+    ):
+        assert marker in html
+
+    for fn in (
+        'refreshGovernanceLifecycle',
+        'previewGovernanceLifecycle',
+        'writeGovernanceLifecycle',
+        'lintGovernanceLifecycle',
+        'selectGovernanceLifecycleRun',
+    ):
+        assert re.search(rf'function\s+{fn}\s*\(', app_js), f'{fn} handler missing'
+
+    assert 'const governanceLifecycleState = {' in app_js
+    assert 'lastProjectResponse: null' in app_js
+    assert 'governanceLifecycleState.lastProjectResponse = data;' in app_js
+    assert 'renderGovernanceLifecycleRuns(governanceLifecycleState.lastProjectResponse || { runs: governanceLifecycleState.runs });' in app_js
+    assert '프로젝트:' in app_js
+    assert '_renderLifecycleCreatedArtifacts(payload.created_artifacts)' in app_js
+    assert 'created_artifacts.map' in app_js
+    assert 'function _postGovernanceLifecycle(url, payload)' in app_js
+    assert 'await response.json()' in app_js
+    assert 'throw new Error(detail.error || detail.detail ||' in app_js
+    assert '/api/governance/lifecycle/runs?project_id=' in app_js
+    assert "_postGovernanceLifecycle('/api/governance/lifecycle/preview'" in app_js
+    assert "_postGovernanceLifecycle('/api/governance/lifecycle/write'" in app_js
+    assert "_postGovernanceLifecycle('/api/governance/lifecycle/lint'" in app_js
+
+
+def test_governance_static_cache_busting_version_is_bumped_and_fetchable(e2e_client):
+    html = e2e_client.get('/app').text
+
+    assert 'tailwind.v92.css' in html
+    assert 'bundle.v92.js' in html
+    assert 'v91' not in html
+
+    for path in ('/static/tailwind.v92.css', '/static/bundle.v92.js'):
+        r = e2e_client.get(path)
+        assert r.status_code == 200, f'{path} returned {r.status_code}'
+
+    bundle = e2e_client.get('/static/bundle.v92.js')
+    assert bundle.status_code == 200
+    for marker in (
+        'previewGovernanceLifecycle',
+        'writeGovernanceLifecycle',
+        'lintGovernanceLifecycle',
+        'selectGovernanceLifecycleRun',
+        '/api/governance/lifecycle/preview',
+    ):
+        assert marker in bundle.text
 
 
 def test_timeline_and_subagent_modules_keep_codex_paths_self_consistent():

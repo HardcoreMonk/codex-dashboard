@@ -2701,6 +2701,66 @@ function _governanceMetricTone(value, good = 'text-emerald-300/80', bad = 'text-
   return Number(value || 0) === 0 ? good : bad;
 }
 
+const governanceLifecycleState = {
+  projects: [],
+  selectedProjectId: '',
+  selectedRunId: '',
+  runs: [],
+  lastPreview: null,
+  lastProjectResponse: null,
+  requestSeq: 0,
+};
+
+function _defaultLifecycleTopic(projectId) {
+  return `${projectId || 'project'}-redesign`;
+}
+
+function _lifecycleDisplay(value, fallback = '—') {
+  return value === undefined || value === null || value === '' ? fallback : String(value);
+}
+
+function _lifecycleValueText(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function _renderLifecycleProjectOptions(projects) {
+  const select = document.getElementById('govLifecycleProject');
+  if (!select) return;
+  const normalized = (projects || []).filter((p) => p?.id);
+  const previous = select.value || governanceLifecycleState.selectedProjectId;
+  if (!normalized.length) {
+    select.innerHTML = '<option value="">등록된 프로젝트 없음</option>';
+    select.value = '';
+    governanceLifecycleState.selectedProjectId = '';
+    governanceLifecycleState.lastProjectResponse = null;
+    return;
+  }
+  select.innerHTML = normalized.map((p) => (
+    `<option value="${esc(p.id)}">${esc(p.id || p.title || '')}</option>`
+  )).join('');
+  const next = normalized.some((p) => p.id === previous) ? previous : normalized[0].id;
+  select.value = next;
+  governanceLifecycleState.selectedProjectId = next;
+  const topic = document.getElementById('govLifecycleTopic');
+  if (topic && !topic.value && next) topic.value = _defaultLifecycleTopic(next);
+  select.onchange = () => {
+    governanceLifecycleState.selectedProjectId = select.value;
+    governanceLifecycleState.selectedRunId = '';
+    governanceLifecycleState.lastPreview = null;
+    governanceLifecycleState.lastProjectResponse = null;
+    const topicInput = document.getElementById('govLifecycleTopic');
+    if (topicInput) topicInput.value = _defaultLifecycleTopic(select.value);
+    loadGovernanceLifecycleRuns();
+  };
+}
+
 async function loadGovernanceStatus() {
   const summary = document.getElementById('governanceSummary');
   const index = document.getElementById('governanceWikiIndex');
@@ -2789,6 +2849,9 @@ function renderGovernanceSummary(data) {
     </div>
     <div class="mt-3 space-y-1.5">${projectRows || '<div class="text-center text-white/15 text-xs py-3">등록된 프로젝트 없음</div>'}</div>
     ${err}`;
+  governanceLifecycleState.projects = projects;
+  _renderLifecycleProjectOptions(projects);
+  loadGovernanceLifecycleRuns();
 }
 
 function renderGovernanceWikiIndex(page) {
@@ -2873,6 +2936,263 @@ function _renderGovernanceResult(label, result) {
     <div class="${tone} font-semibold">${esc(label)} ${result?.ok ? '완료' : '실패'}${result?.returncode !== undefined ? ' · code ' + esc(result.returncode) : ''}</div>
     ${result?.stdout ? `<pre class="mt-2 max-h-44 overflow-auto rounded-lg bg-black/25 p-2 text-[10px] text-white/55 whitespace-pre-wrap">${esc(result.stdout)}</pre>` : ''}
     ${result?.stderr ? `<pre class="mt-2 max-h-44 overflow-auto rounded-lg bg-rose-500/10 p-2 text-[10px] text-rose-200/70 whitespace-pre-wrap">${esc(result.stderr)}</pre>` : ''}`;
+}
+
+function _lifecycleStageTone(status) {
+  if (['passed', 'done', 'complete', 'completed', 'ok'].includes(status)) return 'text-emerald-300/80 border-emerald-500/20 bg-emerald-500/10';
+  if (status === 'draft') return 'text-amber-200/80 border-amber-500/20 bg-amber-500/10';
+  if (['blocked', 'failed', 'error'].includes(status)) return 'text-rose-300/80 border-rose-500/20 bg-rose-500/10';
+  return 'text-white/35 border-white/[0.07] bg-white/[0.03]';
+}
+
+function _renderLifecycleStages(stages = {}) {
+  const names = [
+    'intake',
+    'superpowers:brainstorming',
+    'grill-me',
+    'plan-design-review',
+    'superpowers:writing-plans',
+    'plan-eng-review',
+    'implement',
+    'code-review',
+    'release',
+    'operate',
+  ];
+  return `<div class="grid grid-cols-2 md:grid-cols-5 gap-1.5 mt-2">${names.map((name) => {
+    const status = stages?.[name] || 'pending';
+    return `<div class="rounded-lg border px-2 py-1 ${_lifecycleStageTone(status)}">
+      <div class="text-[8px] uppercase tracking-widest truncate">${esc(name)}</div>
+      <div class="text-[10px] font-bold">${esc(status)}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function _renderLifecycleArtifacts(artifacts = {}) {
+  const entries = Object.entries(artifacts || {});
+  if (!entries.length) return '';
+  return `<div class="mt-2 space-y-1">${entries.map(([key, value]) => (
+    `<div class="text-[10px] text-white/35 truncate"><span class="text-white/20">${esc(key)}:</span> ${esc(_lifecycleValueText(value))}</div>`
+  )).join('')}</div>`;
+}
+
+function _renderLifecycleCreatedArtifacts(created_artifacts = []) {
+  if (!Array.isArray(created_artifacts) || !created_artifacts.length) return '';
+  return `<div class="mt-2 space-y-1">
+    <div class="text-[9px] text-white/25 uppercase tracking-widest font-bold">created artifacts</div>
+    ${created_artifacts.map((path) => (
+      `<div class="text-[10px] text-white/40 truncate">${esc(_lifecycleValueText(path))}</div>`
+    )).join('')}
+  </div>`;
+}
+
+function _renderLifecycleMessages(items, tone) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return '';
+  return `<div class="mt-2 space-y-1">${list.map((item) => (
+    `<div class="${tone} text-[10px] leading-relaxed">${esc(_lifecycleValueText(item))}</div>`
+  )).join('')}</div>`;
+}
+
+function renderGovernanceLifecycleRuns(data) {
+  const el = document.getElementById('governanceLifecycleRuns');
+  if (!el) return;
+  if (data?.project) governanceLifecycleState.lastProjectResponse = data;
+  const project = data?.project || governanceLifecycleState.lastProjectResponse?.project || null;
+  const projectId = project?.id || governanceLifecycleState.selectedProjectId || document.getElementById('govLifecycleProject')?.value || '';
+  const projectPath = project?.path || projectId || '';
+  const runs = Array.isArray(data?.runs) ? data.runs : [];
+  governanceLifecycleState.runs = runs;
+  if (!runs.length) {
+    governanceLifecycleState.selectedRunId = '';
+    el.innerHTML = '<div class="text-center text-white/15 text-xs py-4">lifecycle run 없음</div>';
+    return;
+  }
+  const selected = runs.find((run) => run.run_id === governanceLifecycleState.selectedRunId) || runs[0];
+  governanceLifecycleState.selectedRunId = selected.run_id || '';
+  const rows = runs.map((run) => {
+    const active = run.run_id === selected.run_id;
+    return `
+      <button data-action="selectGovernanceLifecycleRun" data-arg0="${esc(run.run_id || '')}" class="w-full text-left rounded-lg px-2 py-1.5 border spring ${active ? 'bg-accent/10 border-accent/20 text-accent' : 'bg-white/[0.025] border-white/[0.04] text-white/50 hover:text-white/75'}">
+        <div class="font-semibold truncate">${esc(run.run_id || 'unknown-run')}</div>
+        <div class="text-[9px] text-white/30 truncate">${esc(run.status || 'snapshot')} · ${esc(run.relative_path || '')}</div>
+      </button>`;
+  }).join('');
+  const lint = selected.lint || {};
+  el.innerHTML = `
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2">
+      <div class="space-y-1.5">${rows}</div>
+      <div class="rounded-lg bg-white/[0.025] border border-white/[0.05] p-3 min-w-0">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-white/75 font-semibold truncate">${esc(selected.run_id || 'unknown-run')}</div>
+            <div class="text-[9px] text-white/30 truncate">${esc(selected.generated_at || selected.date || selected.relative_path || 'generated unknown')}</div>
+            <div class="text-[9px] text-white/30 truncate">프로젝트: ${esc(projectId || 'unknown')} · ${esc(projectPath || 'path unknown')}</div>
+          </div>
+          <div class="text-[10px] text-white/35 whitespace-nowrap">${esc(selected.status || (selected.error ? 'error' : 'snapshot'))}</div>
+        </div>
+        ${selected.error ? `<div class="mt-2 text-rose-300/75">${esc(selected.error)}</div>` : ''}
+        ${_renderLifecycleStages(selected.stages || {})}
+        ${_renderLifecycleArtifacts(selected.artifacts || {})}
+        ${_renderLifecycleMessages(lint.errors, 'text-rose-300/75')}
+        ${_renderLifecycleMessages(lint.warnings, 'text-amber-200/75')}
+      </div>
+    </div>`;
+}
+
+async function loadGovernanceLifecycleRuns() {
+  const projectId = document.getElementById('govLifecycleProject')?.value || governanceLifecycleState.selectedProjectId;
+  const el = document.getElementById('governanceLifecycleRuns');
+  if (!el) return;
+  if (!projectId) {
+    el.innerHTML = '<div class="text-center text-white/15 text-xs py-4">프로젝트를 선택하세요</div>';
+    return;
+  }
+  const requestSeq = ++governanceLifecycleState.requestSeq;
+  governanceLifecycleState.selectedProjectId = projectId;
+  el.innerHTML = '<div class="text-center text-white/15 text-xs py-4 dots">lifecycle runs 로딩 중</div>';
+  try {
+    const data = await safeFetch(`/api/governance/lifecycle/runs?project_id=${encodeURIComponent(projectId)}`);
+    if (requestSeq !== governanceLifecycleState.requestSeq) return;
+    governanceLifecycleState.lastProjectResponse = data;
+    renderGovernanceLifecycleRuns(data);
+  } catch (e) {
+    renderError(el, e, loadGovernanceLifecycleRuns);
+  }
+}
+
+function _governanceLifecyclePayload() {
+  return {
+    project_id: document.getElementById('govLifecycleProject')?.value || governanceLifecycleState.selectedProjectId,
+    topic: _governanceInput('govLifecycleTopic'),
+  };
+}
+
+function _renderLifecycleExecutionBlock(result) {
+  if (!result?.stdout && !result?.stderr && !result?.json_error) return '';
+  return `
+    ${result?.stdout ? `<pre class="mt-2 max-h-44 overflow-auto text-[10px] text-white/55 whitespace-pre-wrap">${esc(result.stdout)}</pre>` : ''}
+    ${result?.stderr ? `<pre class="mt-2 max-h-44 overflow-auto text-[10px] text-rose-200/70 whitespace-pre-wrap">${esc(result.stderr)}</pre>` : ''}
+    ${result?.json_error ? `<div class="mt-2 text-rose-300/75">${esc(result.json_error)}</div>` : ''}`;
+}
+
+async function _postGovernanceLifecycle(url, payload) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  let detail = {};
+  try {
+    detail = await response.json();
+  } catch {
+    detail = {};
+  }
+  if (!response.ok) {
+    throw new Error(detail.error || detail.detail || detail.message || `HTTP ${response.status}`);
+  }
+  return detail;
+}
+
+function _renderGovernanceLifecycleResult(label, result) {
+  const el = document.getElementById('governanceLifecycleResult');
+  if (!el) return;
+  const tone = result?.ok ? 'text-emerald-300/80' : 'text-rose-300/80';
+  const payload = result?.payload || {};
+  const lint = result?.lint;
+  const errors = Array.isArray(payload.errors) ? payload.errors : [];
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  const summary = payload.summary || {};
+  el.innerHTML = `
+    <div class="${tone} font-semibold">${esc(label)} ${result?.ok ? '완료' : '실패'} · code ${esc(_lifecycleDisplay(result?.returncode))} · ${esc(_lifecycleDisplay(result?.duration_ms, '0'))}ms</div>
+    ${payload.run_id ? `<div class="mt-1 text-white/40">run: <span class="text-white/65">${esc(payload.run_id)}</span></div>` : ''}
+    ${summary.run_count !== undefined ? `<div class="mt-1 text-white/40">lint summary: runs ${esc(_lifecycleDisplay(summary.run_count, '0'))} · errors ${esc(_lifecycleDisplay(summary.error_count, '0'))} · warnings ${esc(_lifecycleDisplay(summary.warning_count, '0'))}</div>` : ''}
+    ${payload.planned_artifacts ? _renderLifecycleArtifacts(payload.planned_artifacts) : ''}
+    ${_renderLifecycleCreatedArtifacts(payload.created_artifacts)}
+    ${_renderLifecycleMessages(errors, 'text-rose-300/75')}
+    ${_renderLifecycleMessages(warnings, 'text-amber-200/75')}
+    ${lint ? `<div class="mt-1 text-white/40">lint: ${esc(lint.ok ? 'ok' : 'failed')} · code ${esc(_lifecycleDisplay(lint.returncode))} · ${esc(_lifecycleDisplay(lint.duration_ms, '0'))}ms</div>` : ''}
+    ${result?.lint_error ? `<div class="mt-1 text-rose-300/75">${esc(result.lint_error)}</div>` : ''}
+    <details class="mt-2 rounded-lg bg-black/20 border border-white/[0.05] p-2">
+      <summary class="cursor-pointer text-white/35">실행 결과</summary>
+      ${_renderLifecycleExecutionBlock(result)}
+      ${lint ? `<div class="mt-3 text-white/35 font-semibold">lint result</div>${_renderLifecycleExecutionBlock(lint)}` : ''}
+    </details>`;
+}
+
+function selectGovernanceLifecycleRun(runId) {
+  governanceLifecycleState.selectedRunId = runId;
+  renderGovernanceLifecycleRuns(governanceLifecycleState.lastProjectResponse || { runs: governanceLifecycleState.runs });
+}
+
+async function previewGovernanceLifecycle() {
+  const payload = _governanceLifecyclePayload();
+  const el = document.getElementById('governanceLifecycleResult');
+  if (!payload.project_id || !payload.topic) {
+    showToast('project와 topic을 입력하세요', { type: 'warning' });
+    return;
+  }
+  if (el) el.textContent = 'Lifecycle preview 실행 중…';
+  try {
+    const result = await _postGovernanceLifecycle('/api/governance/lifecycle/preview', payload);
+    governanceLifecycleState.lastPreview = result;
+    _renderGovernanceLifecycleResult('Lifecycle preview', result);
+    showToast(`Lifecycle preview ${result.ok ? '완료' : '실패'}`, { type: result.ok ? 'success' : 'error', duration: 2500 });
+    loadAuditLog();
+  } catch (e) {
+    if (el) renderError(el, e, previewGovernanceLifecycle);
+    showToast(`Lifecycle preview 실패: ${e.message || e}`, { type: 'error' });
+  }
+}
+
+async function writeGovernanceLifecycle() {
+  const payload = { ..._governanceLifecyclePayload(), confirm: true };
+  const el = document.getElementById('governanceLifecycleResult');
+  if (!payload.project_id || !payload.topic) {
+    showToast('project와 topic을 입력하세요', { type: 'warning' });
+    return;
+  }
+  if (!confirm(`${payload.project_id}에 lifecycle run을 생성합니다: ${payload.topic}`)) return;
+  if (el) el.textContent = 'Lifecycle write 실행 중…';
+  try {
+    const result = await _postGovernanceLifecycle('/api/governance/lifecycle/write', payload);
+    _renderGovernanceLifecycleResult('Lifecycle write', result);
+    if (result?.payload?.run_id) governanceLifecycleState.selectedRunId = result.payload.run_id;
+    showToast(`Lifecycle write ${result.ok ? '완료' : '실패'}`, { type: result.ok ? 'success' : 'error', duration: 2500 });
+    loadGovernanceLifecycleRuns();
+    loadAuditLog();
+  } catch (e) {
+    if (el) renderError(el, e, writeGovernanceLifecycle);
+    showToast(`Lifecycle write 실패: ${e.message || e}`, { type: 'error' });
+  }
+}
+
+async function lintGovernanceLifecycle() {
+  const projectId = document.getElementById('govLifecycleProject')?.value || governanceLifecycleState.selectedProjectId;
+  const runId = governanceLifecycleState.selectedRunId || governanceLifecycleState.runs[0]?.run_id;
+  const el = document.getElementById('governanceLifecycleResult');
+  if (!projectId || !runId) {
+    showToast('lint할 lifecycle run이 없습니다', { type: 'warning' });
+    return;
+  }
+  if (el) el.textContent = 'Lifecycle lint 실행 중…';
+  try {
+    const result = await _postGovernanceLifecycle('/api/governance/lifecycle/lint', { project_id: projectId, run_id: runId });
+    _renderGovernanceLifecycleResult('Lifecycle lint', result);
+    showToast(`Lifecycle lint ${result.ok ? '완료' : '실패'}`, { type: result.ok ? 'success' : 'error', duration: 2500 });
+    loadGovernanceLifecycleRuns();
+    loadAuditLog();
+  } catch (e) {
+    if (el) renderError(el, e, lintGovernanceLifecycle);
+    showToast(`Lifecycle lint 실패: ${e.message || e}`, { type: 'error' });
+  }
+}
+
+function refreshGovernanceLifecycle() {
+  if (!governanceLifecycleState.selectedProjectId && !document.getElementById('govLifecycleProject')?.value) {
+    loadGovernanceStatus();
+    return;
+  }
+  loadGovernanceLifecycleRuns();
 }
 
 async function addGovernanceProject() {
