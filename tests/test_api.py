@@ -3,6 +3,7 @@ temporary SQLite DB with controlled fixture data.
 
 Unlike the unit tests, these exercise the full middleware + routing stack.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -603,6 +604,45 @@ def _seed_governance_workspace(tmp_path, monkeypatch):
     audit = wiki / 'audit'
     scripts = repo / 'scripts'
     scripts.mkdir(parents=True)
+    demo_repo = zone / 'demo'
+    run_dir = demo_repo / 'docs' / 'lifecycle' / 'runs'
+    run_dir.mkdir(parents=True)
+    (demo_repo / 'docs' / 'superpowers' / 'specs').mkdir(parents=True)
+    (demo_repo / 'docs' / 'superpowers' / 'specs' / '2026-05-03-demo-redesign-design.md').write_text(
+        '# Demo Redesign\n',
+        encoding='utf-8',
+    )
+    (run_dir / '2026-05-03-demo-redesign.json').write_text(
+        json.dumps({
+            'schema_version': 1,
+            'run_id': '2026-05-03-demo-redesign',
+            'topic': 'demo-redesign',
+            'date': '2026-05-03',
+            'generated_at': '2026-05-03T00:00:00',
+            'tool': 'lifecycle-redesign-start',
+            'target': {'path': '.', 'project_id': 'demo'},
+            'artifacts': {
+                'spec': 'docs/superpowers/specs/2026-05-03-demo-redesign-design.md',
+            },
+            'stages': {
+                'intake': 'draft',
+                'superpowers:brainstorming': 'draft',
+                'grill-me': 'pending',
+                'plan-design-review': 'pending',
+                'superpowers:writing-plans': 'pending',
+                'plan-eng-review': 'pending',
+                'implement': 'pending',
+                'code-review': 'pending',
+                'release': 'pending',
+                'operate': 'pending',
+            },
+            'scan_summary': {},
+            'redactions': {},
+            'lint': {'errors': [], 'warnings': []},
+            'status': 'created',
+        }, indent=2) + '\n',
+        encoding='utf-8',
+    )
     wiki.mkdir(parents=True)
     raw.mkdir(parents=True)
     audit.mkdir(parents=True)
@@ -642,22 +682,81 @@ def _seed_governance_workspace(tmp_path, monkeypatch):
         ]) + '\n',
         encoding='utf-8',
     )
-    (scripts / 'wiki-check.sh').write_text(
+    wiki_check_script = scripts / 'wiki-check.sh'
+    project_sync_script = scripts / 'project-sync.sh'
+    zone_audit_script = scripts / 'zone-audit.sh'
+    zone_track_script = scripts / 'zone-track.sh'
+    lifecycle_start_script = scripts / 'lifecycle-redesign-start.sh'
+    lifecycle_lint_script = scripts / 'lifecycle-lint.sh'
+
+    wiki_check_script.write_text(
         '#!/usr/bin/env bash\nprintf "wiki-check ok: test\\n"\n',
         encoding='utf-8',
     )
-    (scripts / 'project-sync.sh').write_text(
+    wiki_check_script.chmod(0o755)
+    project_sync_script.write_text(
         '#!/usr/bin/env bash\nprintf "project-sync ok: test\\n"\n',
         encoding='utf-8',
     )
-    (scripts / 'zone-audit.sh').write_text(
+    project_sync_script.chmod(0o755)
+    zone_audit_script.write_text(
         '#!/usr/bin/env bash\nprintf "zone-audit ok: test\\n"\n',
         encoding='utf-8',
     )
-    (scripts / 'zone-track.sh').write_text(
+    zone_audit_script.chmod(0o755)
+    zone_track_script.write_text(
         '#!/usr/bin/env bash\nprintf "zone-track ok: test\\n"\n',
         encoding='utf-8',
     )
+    zone_track_script.chmod(0o755)
+    lifecycle_start_script.write_text(
+        '''#!/usr/bin/env bash
+set -euo pipefail
+project="$1"
+shift
+write=false
+topic=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --topic) topic="$2"; shift 2 ;;
+    --write) write=true; shift ;;
+    --json) shift ;;
+    *) shift ;;
+  esac
+done
+run_id="2026-05-03-${topic}"
+if [ "$write" = true ]; then
+  printf '%s\\n' "$run_id" > .lifecycle-write-marker
+  printf '{"schema_version":1,"mode":"write","target":{"project_id":"%s"},"run_id":"%s","created_artifacts":["docs/superpowers/specs/%s-design.md"],"errors":[],"warnings":[],"exit_code":0}\\n' "$project" "$run_id" "$run_id"
+else
+  printf '{"schema_version":1,"mode":"preview","target":{"project_id":"%s"},"run_id":"%s","planned_artifacts":{"spec":"docs/superpowers/specs/%s-design.md"},"created_artifacts":[],"errors":[],"warnings":[],"exit_code":0}\\n' "$project" "$run_id" "$run_id"
+fi
+''',
+        encoding='utf-8',
+    )
+    lifecycle_start_script.chmod(0o755)
+    lifecycle_lint_script.write_text(
+        '''#!/usr/bin/env bash
+set -euo pipefail
+project="$1"
+shift
+run_id=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --run) run_id="$2"; shift 2 ;;
+    --json) shift ;;
+    *) shift ;;
+  esac
+done
+if [ ! -f .lifecycle-write-marker ] || [ "$(cat .lifecycle-write-marker)" != "$run_id" ]; then
+  printf '{"schema_version":1,"target":{"project_id":"%s"},"runs":[{"run_id":"%s","errors":["write marker missing or mismatched"],"warnings":[],"stages":{"intake":"draft","superpowers:brainstorming":"draft"},"exit_code":1}],"summary":{"run_count":1,"error_count":1,"warning_count":0},"errors":["write marker missing or mismatched"],"warnings":[],"exit_code":1}\\n' "$project" "$run_id"
+  exit 1
+fi
+printf '{"schema_version":1,"target":{"project_id":"%s"},"runs":[{"run_id":"%s","errors":[],"warnings":[],"stages":{"intake":"draft","superpowers:brainstorming":"draft"},"exit_code":0}],"summary":{"run_count":1,"error_count":0,"warning_count":0},"errors":[],"warnings":[],"exit_code":0}\\n' "$project" "$run_id"
+''',
+        encoding='utf-8',
+    )
+    lifecycle_lint_script.chmod(0o755)
 
     monkeypatch.setattr(main, 'ZONE_ROOT', zone.resolve())
     monkeypatch.setattr(main, 'GOVERNANCE_REPO_DIR', repo.resolve())
@@ -665,10 +764,12 @@ def _seed_governance_workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(main, 'WIKI_DIR', wiki.resolve())
     monkeypatch.setattr(main, 'RAW_DIR', raw.resolve())
     monkeypatch.setattr(main, 'AUDIT_DIR', audit.resolve())
-    monkeypatch.setattr(main, 'PROJECT_SYNC_SCRIPT', (scripts / 'project-sync.sh').resolve())
-    monkeypatch.setattr(main, 'WIKI_CHECK_SCRIPT', (scripts / 'wiki-check.sh').resolve())
-    monkeypatch.setattr(main, 'ZONE_AUDIT_SCRIPT', (scripts / 'zone-audit.sh').resolve())
-    monkeypatch.setattr(main, 'ZONE_TRACK_SCRIPT', (scripts / 'zone-track.sh').resolve())
+    monkeypatch.setattr(main, 'PROJECT_SYNC_SCRIPT', project_sync_script.resolve())
+    monkeypatch.setattr(main, 'WIKI_CHECK_SCRIPT', wiki_check_script.resolve())
+    monkeypatch.setattr(main, 'ZONE_AUDIT_SCRIPT', zone_audit_script.resolve())
+    monkeypatch.setattr(main, 'ZONE_TRACK_SCRIPT', zone_track_script.resolve())
+    monkeypatch.setattr(main, 'LIFECYCLE_REDESIGN_START_SCRIPT', lifecycle_start_script.resolve(), raising=False)
+    monkeypatch.setattr(main, 'LIFECYCLE_LINT_SCRIPT', lifecycle_lint_script.resolve(), raising=False)
     return zone
 
 
@@ -784,6 +885,128 @@ def test_governance_project_add_rejects_duplicate_and_bad_path(api_client, tmp_p
         'path': '../escape-demo',
     })
     assert bad_path.status_code == 400
+
+
+def test_governance_lifecycle_lists_project_runs(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    r = api_client.get('/api/governance/lifecycle/runs', params={'project_id': 'demo'})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body['project']['id'] == 'demo'
+    assert body['summary']['run_count'] == 1
+    assert body['runs'][0]['run_id'] == '2026-05-03-demo-redesign'
+    assert body['runs'][0]['relative_path'] == 'docs/lifecycle/runs/2026-05-03-demo-redesign.json'
+
+
+def test_governance_lifecycle_preview_runs_json_script_and_audits(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    r = api_client.post('/api/governance/lifecycle/preview', json={
+        'project_id': 'demo',
+        'topic': 'demo-redesign',
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body['ok'] is True
+    assert body['payload']['mode'] == 'preview'
+    assert body['payload']['run_id'] == '2026-05-03-demo-redesign'
+    assert '--write' not in body['command']
+
+    audit = api_client.get('/api/admin/audit?action=governance_lifecycle_preview')
+    assert audit.status_code == 200
+    detail = audit.json()['entries'][0]['detail']
+    assert detail['project_id'] == 'demo'
+    assert detail['run_id'] == '2026-05-03-demo-redesign'
+    assert 'stdout' not in detail
+    assert 'stderr' not in detail
+
+
+def test_governance_lifecycle_write_requires_confirm(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    r = api_client.post('/api/governance/lifecycle/write', json={
+        'project_id': 'demo',
+        'topic': 'demo-redesign',
+        'confirm': False,
+    })
+
+    assert r.status_code == 400
+    assert r.json()['error'] == 'write confirmation required'
+
+
+def test_governance_lifecycle_write_runs_lint_after_script(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    r = api_client.post('/api/governance/lifecycle/write', json={
+        'project_id': 'demo',
+        'topic': 'demo-redesign',
+        'confirm': True,
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body['ok'] is True
+    assert body['payload']['mode'] == 'write'
+    assert '--write' in body['command']
+    assert body['lint']['ok'] is True
+    assert body['lint']['payload']['summary']['error_count'] == 0
+
+    audit = api_client.get('/api/admin/audit?action=governance_lifecycle_write')
+    assert audit.status_code == 200
+    detail = audit.json()['entries'][0]['detail']
+    assert detail['created_count'] == 1
+    assert detail['error_count'] == 0
+
+
+def test_governance_lifecycle_lint_runs_json_script_and_audits(api_client, tmp_path, monkeypatch):
+    zone = _seed_governance_workspace(tmp_path, monkeypatch)
+    (zone / 'codex-project-mgmt' / '.lifecycle-write-marker').write_text(
+        '2026-05-03-demo-redesign\n',
+        encoding='utf-8',
+    )
+
+    r = api_client.post('/api/governance/lifecycle/lint', json={
+        'project_id': 'demo',
+        'run_id': '2026-05-03-demo-redesign',
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body['ok'] is True
+    assert body['payload']['summary']['run_count'] == 1
+
+    audit = api_client.get('/api/admin/audit?action=governance_lifecycle_lint')
+    assert audit.status_code == 200
+    assert audit.json()['entries'][0]['detail']['run_id'] == '2026-05-03-demo-redesign'
+
+
+def test_governance_lifecycle_rejects_invalid_project_topic_and_run_id(api_client, tmp_path, monkeypatch):
+    _seed_governance_workspace(tmp_path, monkeypatch)
+
+    missing_project = api_client.get('/api/governance/lifecycle/runs', params={'project_id': 'missing'})
+    assert missing_project.status_code == 404
+
+    bad_topic = api_client.post('/api/governance/lifecycle/preview', json={
+        'project_id': 'demo',
+        'topic': 'Bad Topic',
+    })
+    assert bad_topic.status_code == 400
+
+    bad_run = api_client.post('/api/governance/lifecycle/lint', json={
+        'project_id': 'demo',
+        'run_id': '../escape',
+    })
+    assert bad_run.status_code == 400
+
+
+def test_governance_lifecycle_api_denied_without_login_when_password_set(auth_api_client):
+    r = auth_api_client.get('/api/governance/lifecycle/runs', params={'project_id': 'demo'})
+
+    assert r.status_code == 401
+    assert r.json() == {'error': 'unauthorized'}
 
 
 @pytest.mark.parametrize(
